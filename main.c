@@ -30,7 +30,7 @@
 #endif
 #endif
 
-#define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
 #define WHOAMI()		fprintf( stderr, "%s:%d:%s\n", __FILE__, __LINE__, __func__ )
