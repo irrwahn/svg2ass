@@ -1,0 +1,123 @@
+
+Welcome to ... *drumroll* ... SVG2ASS!
+(A.k.a world's lousiest SVG to ASS converter)
+
+
+HUH, SVG MY ASS?!?
+
+SVG2ASS feeds on SVG files and drops ASS snippets, ready to make your 
+eyes bleed when pasted in e.g. Aegisub. Only a selection of actually 
+useful basic SVG features is supported, whereas most of the more 
+"advanced" (read: crammed in) SVG crap is simply ignored. You can work 
+around some of the limitations by converting everything (even the 
+kitchen sink) to paths and flattening your SVG as much as feasible.
+The SVG is not validated at all, thus you might get away with feeding 
+SVG2ASS some Shakespeare play and get some fancy shapes from it.
+
+Supported elements:
+* line (Yay!)
+* rect (WooOOOoot!)
+* circle, ellipse (despite ASS having no ellipse primitive; 
+    now go read the code and cower in fear!)
+* path (except arcs - which is indeed a severe shortcoming, even more 
+    so, as e.g. Inkscape uses arc paths instead of "real" ellipses. 
+    WTF? )
+
+Supported attributes:
+* essential attributes WRT the elements listed above
+* styles: colors/alpha for fill and stroke; stroke width
+* transform: not (yet)
+
+That's pretty much it. Not half bad, you think? Well, here's the catch:
+ 
+Advanced SubStation Alpha drawing command syntax is a fine example of 
+how to miss a fly with a bowling ball at point-blank range. One result 
+of this madness is (now buckle your belt, Dorothy, 'cause Kansas is 
+going bye-bye) that you can choose, if you'd rather have  
+  a) your shape coordinates (layout) messed up, or 
+  b) only the last color definiton applied to all the shapes in a line. 
+Future versions of SVG2ASS may provide a command line switch to let 
+you choose your favorite variety of fuck-up. 
+
+(On a side note: I'm not sure, if real-world SVG does that much better. 
+It's XML after all, what can you expect? MFW when I realised I'd need 
+three(!) parsers to support even the most basic features. D'uh!)
+
+
+BUILD IT!
+
+Just slab it together using compiler and linker, see Makefile. Nothing 
+fancy there, save that one peculiarity: want _POSIX_C_SOURCE=200809L 
+define, or else the string stuff will go awry. (I wonder if I should 
+subtitute sxmlc with something even dumber and thus avoid the define.  
+Would better fit the spirit of the project as well.)
+
+
+LEGALESE
+
+All genuine svg2ass components (exceptions: see below) is lincensed 
+under the terms of the WTFPL license v2:
+
+--8<------------------------------------------------------------------
+            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+                    Version 2, December 2004
+ 
+ Copyright (C) 2004 Sam Hocevar
+  14 rue de Plaisance, 75014 Paris, France
+ Everyone is permitted to copy and distribute verbatim or modified
+ copies of this license document, and changing it is allowed as long
+ as the name is changed.
+ 
+            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+ 
+  0. You just DO WHAT THE FUCK YOU WANT TO.
+------------------------------------------------------------------>8--
+
+
+
+Notable exception #1: 
+The sxmlc code is licensed under the following terms:
+
+--8<------------------------------------------------------------------
+	Copyright (c) 2010, Matthieu Labas
+	All rights reserved.
+
+	Redistribution and use in source and binary forms, with or without modification,
+	are permitted provided that the following conditions are met:
+
+	1. Redistributions of source code must retain the above copyright notice,
+	   this list of conditions and the following disclaimer.
+
+	2. Redistributions in binary form must reproduce the above copyright notice,
+	   this list of conditions and the following disclaimer in the documentation
+	   and/or other materials provided with the distribution.
+
+	THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+	ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+	WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+	IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+	INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+	NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+	PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+	WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+	ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
+	OF SUCH DAMAGE.
+
+	The views and conclusions contained in the software and documentation are those of the
+	authors and should not be interpreted as representing official policies, either expressed
+	or implied, of the FreeBSD Project.
+------------------------------------------------------------------>8--
+
+
+Notable exception #2:
+The path parser logic was shamelessly stolen from libsvgtiny, written 
+by James Bursa, see http://www.netsurf-browser.org/projects/libsvgtiny/
+Don't know what to make of this, but anyway, libsvgtiny is Licensed 
+under the terms of the MIT License:
+
+--8<------------------------------------------------------------------
+	http://opensource.org/licenses/mit-license.php
+------------------------------------------------------------------>8--
+
+
