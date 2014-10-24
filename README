@@ -36,8 +36,8 @@ of this madness is (now buckle your belt, Dorothy, 'cause Kansas is
 going bye-bye) that you can choose, if you'd rather have  
   a) your shape coordinates (layout) messed up, or 
   b) only the last color definiton applied to all the shapes in a line. 
-Future versions of SVG2ASS may provide a command line switch to let 
-you choose your favorite variety of fuck-up. 
+SVG2ASS provides a command line switch to let you choose your favorite 
+variety of fuck-up. 
 
 (On a side note: I'm not sure, if real-world SVG does that much better. 
 It's XML after all, what can you expect? MFW when I realised I'd need 
@@ -47,15 +47,15 @@ three(!) parsers to support even the most basic features. D'uh!)
 BUILD IT!
 
 Just slab it together using compiler and linker, see Makefile. Nothing 
-fancy there, save that one peculiarity: want _POSIX_C_SOURCE=200809L 
-define, or else the string stuff will go awry. (I wonder if I should 
+fancy there, save that one peculiarity: you want _POSIX_C_SOURCE=200809L 
+defined, or else the string stuff will go awry. (I wonder if I should 
 subtitute sxmlc with something even dumber and thus avoid the define.  
 Would better fit the spirit of the project as well.)
 
 
 LEGALESE
 
-All genuine svg2ass components (exceptions: see below) is lincensed 
+All genuine svg2ass components (exceptions: see below) are lincensed 
 under the terms of the WTFPL license v2:
 
 --8<------------------------------------------------------------------
@@ -73,8 +73,6 @@ under the terms of the WTFPL license v2:
  
   0. You just DO WHAT THE FUCK YOU WANT TO.
 ------------------------------------------------------------------>8--
-
-
 
 Notable exception #1: 
 The sxmlc code is licensed under the following terms:
@@ -109,7 +107,6 @@ The sxmlc code is licensed under the following terms:
 	or implied, of the FreeBSD Project.
 ------------------------------------------------------------------>8--
 
-
 Notable exception #2:
 The path parser logic was shamelessly stolen from libsvgtiny, written 
 by James Bursa, see http://www.netsurf-browser.org/projects/libsvgtiny/
@@ -119,5 +116,4 @@ under the terms of the MIT License:
 --8<------------------------------------------------------------------
 	http://opensource.org/licenses/mit-license.php
 ------------------------------------------------------------------>8--
-
 

@@ -4,8 +4,14 @@
  *  Created: 2014-10-23
  *   Author: Urban Wallasch
  * 
- * ToDo:
+ * TODOs:
  *  - Actually test the more esoteric curveto path commands
+ *  - Parse transformation, apply to context (at least translate;
+ *      ... matrices? Bruahahaha!
+ *  - Find a way to emulate arcs with Bezier curves? Oh my!
+ *  - Clippath? ?? ???
+ *  - rounded rects? (c'mon, object-to-path is your friend!)
+ * 
  * Notes:
  *  - Unicode support is utterly borked, and I couldn't care less.
  *  - The more you "flatten" your SVG (objects to paths, no layering, 
@@ -17,6 +23,8 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+
+#include <unistd.h>
 
 #include "sxmlc.h"
 #include "colors.h"
@@ -30,13 +38,12 @@
 #endif
 #endif
 
-//#define DEBUG
+//#define  DEBUG		// belongs in Makefile
 
 #ifdef DEBUG
 #define WHOAMI()		fprintf( stderr, "%s:%d:%s\n", __FILE__, __LINE__, __func__ )
-#define INDENT(N)		fprintf( stderr, "%*s", ((N) * 4), "" )
 #define DPRINT(...)		do { \
-							INDENT( ctx->indent ); \
+							fprintf( stderr, "%*s", (ctx->indent * 4), "" ); \
 							sx_fprintf( stderr, __VA_ARGS__ ); \
 						} while(0)
 #else
@@ -47,6 +54,14 @@
 
 #define emit(...)		fprintf( stdout, __VA_ARGS__ )
 
+
+/*
+ *  Config
+ */
+ 
+ static struct {
+	 int assfup;
+ } config;
 
 /*
  * Context stack crap
@@ -94,7 +109,9 @@ static int ctx_pop( SVGContext *ctx )
 static int parseStyles( SVGContext *ctx, SXML_CHAR *style )
 {
 	int n = 0;
-	int en = 0;
+	int nocol = 3;
+	unsigned fill_col = 0, fill_a = 0, stroke_col = 0, stroke_a = 0;
+	double stroke_wid = 1;
 	char *s;
 	char name[100];
 	char value[100];
@@ -102,26 +119,38 @@ static int parseStyles( SVGContext *ctx, SXML_CHAR *style )
 	s = style;
 	while ( sscanf( s, "%99[^:]:%99[^;];%n", name, value, &n ) == 2 )
 	{   
-		if ( !en )
-		{
-			emit( "{" );
-			en = 1;
-		}
 		//DPRINT( "%s=%s\n", name, value );
-		if ( 0 == strcasecmp( name, "fill" ) )
-			emit( "\\1c&H%06X&", convColorBGR( value ) );
+		if ( 0 == strcasecmp( name, "fill" ) && 0 != strcasecmp( value, "none" ) )
+		{
+			nocol &= ~1;
+			fill_col = convColorBGR( value );
+		}
+		else if ( 0 == strcasecmp( name, "stroke" )  && 0 != strcasecmp( value, "none" ) )
+		{
+			nocol &= ~2;
+			stroke_col = convColorBGR( value );
+		}
 		else if ( 0 == strcasecmp( name, "fill-opacity" ) )
-			emit( "\\1a&H%02X&", (unsigned)( 255 - atof( value ) * 255 ) );
-		else if ( 0 == strcasecmp( name, "stroke" ) )
-			emit( "\\3c&H%06X&", convColorBGR( value ) );
+			fill_a = 255 - atof( value ) * 255;
 		else if ( 0 == strcasecmp( name, "stroke-opacity" ) )
-			emit( "\\3a&H%02X&", (unsigned)( 255 - atof( value ) * 255 ) );
+			stroke_a = 255 - atof( value ) * 255;
 		else if ( 0 == strcasecmp( name, "stroke-width" ) )
-			emit( "\\bord%g", atof( value ) );
+			stroke_wid = atof( value );
 		s += n;
 	}
-	if ( en )
-		emit( "}" );
+
+	if ( nocol & 1 )
+		fill_a = 255;
+	if ( nocol & 2 )
+		stroke_a = 255;
+
+	emit( "{" );
+	emit( "\\1c&H%06X&", fill_col );
+	emit( "\\1a&H%02X&", fill_a );
+	emit( "\\3c&H%06X&", stroke_col );
+	emit( "\\3a&H%02X&", stroke_a );
+	emit( "\\bord%g", stroke_wid );
+	emit( "}" );
 	(void)ctx;
 	return 0;
 }
@@ -419,7 +448,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		}
 		/* invalid path syntax */
 		else {
-			DPRINT( "parsePath failed at \"%s\"\n", s );
+			fprintf( stderr, "parsePath failed at \"%s\"\n", s );
 			res = -1;
 			break;
 		}
@@ -428,7 +457,6 @@ static int parsePath( SVGContext *ctx, const char *pd )
 	return res;
 }
 
-#define BEZIER_CIRC 	0.551915024494
 
 int svg2ass( XMLEvent evt, const XMLNode *node, SXML_CHAR *text, const int n, SAX_Data *sd )
 {
@@ -468,7 +496,7 @@ int svg2ass( XMLEvent evt, const XMLNode *node, SXML_CHAR *text, const int n, SA
 				y1 = ctx->y + getNumericAttr( node, C2SX( "y" ) );
 				x2 = x1 + getNumericAttr( node, C2SX( "width" ) );
 				y2 = y1 + getNumericAttr( node, C2SX( "height" ) );
-				// TODO: evaluate rx,ry and emulate rounded rect with Bézier curves
+				// TODO: evaluate rx,ry and emulate rounded rect using Bézier curves
 				emit( "m %g %g l %g %g %g %g %g %g", x1, y1, x2, y1, x2, y2, x1, y2 );
 			}
 			else if ( 0 == strcasecmp( node->tag, C2SX( "ellipse" ) )
@@ -493,6 +521,7 @@ int svg2ass( XMLEvent evt, const XMLNode *node, SXML_CHAR *text, const int n, SA
 				with c = 0.551915024494
 				[ http://spencermortensen.com/articles/bezier-circle/ ]
 				*/
+				#define BEZIER_CIRC 	0.551915024494
 				double crx = rx * BEZIER_CIRC;
 				double cry = ry * BEZIER_CIRC;
 				x0 = cx;		y0 = cy + ry;
@@ -522,10 +551,10 @@ int svg2ass( XMLEvent evt, const XMLNode *node, SXML_CHAR *text, const int n, SA
 			else 
 			{
 				/* (yet) unhandled tags:
-				 * polyline, polygon: easily converted to paths befre SVG export!
-				 * text: Forget it, why would you want to export SVG text to ASS?!?
-				 *       (if you really must, convert to path)
-				 * clippath: maybe later, maybe not at all
+				 * polyline, polygon: easily converted to SVG paths!
+				 * text: Forget it, why would you want to export SVG 
+				 *       text to ASS?!? (or simply convert to path)
+				 * clippath: maybe later, maybe never
 				 */
 			}
 			break;
@@ -537,12 +566,6 @@ int svg2ass( XMLEvent evt, const XMLNode *node, SXML_CHAR *text, const int n, SA
 			if ( !ctx->in_svg ) 
 				break;
 			DPRINT( "}\n" );
-			/*
-			if ( 0 == strcasecmp( node->tag, C2SX( "g" ) ) )
-			{
-				pmode( 0 );
-			}
-			*/
 			break;
 
 		case XML_EVENT_TEXT:
@@ -556,37 +579,76 @@ int svg2ass( XMLEvent evt, const XMLNode *node, SXML_CHAR *text, const int n, SA
 		default:
 			break;
 	}
-	pmode( 0 );
+	if ( 1 == config.assfup )
+		pmode( 0 );
 	return true;
 }
 
 int usage( char* progname )
 {
-	fprintf( stderr, "Usage: %s FILE\n", progname );
+	char *p;
+	if ( NULL != ( p = strrchr( progname, '/' ) ) )
+		progname = ++p;
+	fprintf( stderr, "Usage: %s [options] svg_file [...]\n", progname );
+	fprintf( stderr,
+		" Options:\n"
+		"  -a ASS-fuckup mode: 0 = preserve layout (default), 1 = preserve colors\n"
+	);
 	return 0;
 }
 
 int main( int argc, char** argv )
 {
 	SAX_Callbacks sax;
-	SVGContext ctx;
-	char *fn;
+	SVGContext ctx_;
+	SVGContext *ctx = &ctx_;
+	int nfiles = 0;
+	int opt;
+	const char *ostr = "-:a:h";
 
-	if ( argc <= 1 )
+	while ( -1 != ( opt = getopt( argc, argv, ostr ) ) )
 	{
+		switch ( opt )
+		{
+		case 1:
+			DPRINT( "parsing file '%s' ...\n", optarg );
+			memset( ctx, 0, sizeof *ctx );
+			SAX_Callbacks_init( &sax );
+			sax.all_event = svg2ass;
+			if ( true != XMLDoc_parse_file_SAX( optarg, &sax, ctx ) )
+			{
+				fprintf( stderr, "Error processing file '%s'\n", optarg );
+				goto ERR;
+			}
+			pmode( 0 );
+			emit( "\n" );
+			++nfiles;
+			while ( 0 == ctx_pop( ctx ) )
+				;
+			break;
+		case 'a':
+			config.assfup = atoi( optarg );
+			break;
+		case ':':
+			fprintf( stderr, "Missing argument for option '%c'\n", optopt );
+			goto ERR;
+			break;
+		case '?':
+		default:
+			fprintf( stderr, "Unrecognized option '%c'\n", optopt );
+		case 'h':
+			goto ERR;
+			break;
+		}
+	}
+	
+	if ( 0 >= nfiles )
+	{
+		fprintf( stderr, "No files to process\n" );
+	ERR:
 		usage( argv[0] );
 		exit( EXIT_FAILURE );
 	}
-	fn = argv[1];
-
-	memset( &ctx, 0, sizeof ctx );
-	SAX_Callbacks_init( &sax );
-	sax.all_event = svg2ass;
-	emit( "\n" );
-	XMLDoc_parse_file_SAX( fn, &sax, &ctx );
-	pmode( 0 );
-	emit( "\n" );
-
 	exit( EXIT_SUCCESS );
 }
 
