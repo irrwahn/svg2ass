@@ -23,10 +23,11 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #include <unistd.h>
 
-#include "sxmlc.h"
+#include "nxml.h"
 #include "colors.h"
 
 
@@ -44,7 +45,7 @@
 #define WHOAMI()		fprintf( stderr, "%s:%d:%s\n", __FILE__, __LINE__, __func__ )
 #define DPRINT(...)		do { \
 							fprintf( stderr, "%*s", (ctx->indent * 4), "" ); \
-							sx_fprintf( stderr, __VA_ARGS__ ); \
+							fprintf( stderr, __VA_ARGS__ ); \
 						} while(0)
 #else
 #define WHOAMI()
@@ -106,13 +107,13 @@ static int ctx_pop( SVGContext *ctx )
 /*
  * Parse generic attributes
  */
-static int parseStyles( SVGContext *ctx, SXML_CHAR *style )
+static int parseStyles( SVGContext *ctx, const char *style )
 {
 	int n = 0;
 	int nocol = 3;
 	unsigned fill_col = 0, fill_a = 0, stroke_col = 0, stroke_a = 0;
 	double stroke_wid = 1;
-	char *s;
+	const char *s;
 	char name[100];
 	char value[100];
 
@@ -155,29 +156,38 @@ static int parseStyles( SVGContext *ctx, SXML_CHAR *style )
 	return 0;
 }
 
-static int parseGenAttr( SVGContext *ctx, const XMLNode *node )
+static inline int findAttr( const nxmlNode_t *node, const char *name )
+{
+	int a;
+	for ( a = 0; a < (int)node->att_num; ++a )
+		if ( 0 == strcasecmp( node->att[a].name, name ) )
+			return a;
+	return -1;
+}
+
+static int parseGenAttr( SVGContext *ctx, const nxmlNode_t *node )
 {
 	int a;
 	
-	a = XMLNode_search_attribute( node, C2SX( "style" ), 0 );
+	a = findAttr( node, "style" );
 	if ( 0 <= a )
-		parseStyles( ctx, node->attributes[a].value );
+		parseStyles( ctx, node->att[a].val );
 	
 	// TODO: transform --> ctx->x,y
 	
 	return 0;
 }
 
-static inline double getNumericAttr( const XMLNode *node, SXML_CHAR *attr )
+static inline double getNumericAttr( const nxmlNode_t *node, char *attr )
 {
-	int a = XMLNode_search_attribute( node, attr, 0 );
-	return ( 0 <= a ) ? strtod( node->attributes[a].value, NULL ) : 0.0;
+	int a = findAttr( node, attr );
+	return ( 0 <= a ) ? strtod( node->att[a].val, NULL ) : 0.0;
 }
 
-static inline const char *getStringAttr( const XMLNode *node, SXML_CHAR *attr )
+static inline const char *getStringAttr( const nxmlNode_t *node, char *attr )
 {
-	int a = XMLNode_search_attribute( node, attr, 0 );
-	return ( 0 <= a ) ? node->attributes[a].value : "";
+	int a = findAttr( node, attr );
+	return ( 0 <= a ) ? node->att[a].val : "";
 }
 
 /*
@@ -186,23 +196,15 @@ static inline const char *getStringAttr( const XMLNode *node, SXML_CHAR *attr )
 static inline int pmode( int x )
 {
 	static int en = 0;
-	if ( en )
-	{ 
-		if ( !x ) 
-		{
-			emit( "{\\p0}" );
-			en = 0; 
-		}
-		else
-			emit( " " );
+	if ( en && !x ) 
+	{
+		emit( "{\\p0}" );
+		en = 0; 
 	}
-	else 
-	{ 
-		if ( x )
-		{
-			emit( "{\\shad0\\an7\\p1}" ); 
-			en = 1; 
-		}
+	else if ( !en && x )
+	{
+		emit( "{\\shad0\\an7\\p1}" ); 
+		en = 1; 
 	}
 	return en;
 }
@@ -458,139 +460,191 @@ static int parsePath( SVGContext *ctx, const char *pd )
 }
 
 
-int svg2ass( XMLEvent evt, const XMLNode *node, SXML_CHAR *text, const int n, SAX_Data *sd )
+int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 {
-	SVGContext *ctx = sd->user;
+	SVGContext *ctx = usr;
 	double x0, y0, x1, y1, x2, y2, x3, y3;
 	double cx, cy, rx, ry;
 
+	if ( NXML_TYPE_PARENT != node->type 
+		&& NXML_TYPE_SELF != node->type 
+		&& NXML_TYPE_END != node->type )				
+		return 0;
+		
 	switch ( evt ) 
 	{
-		case XML_EVENT_START_NODE:
-			if ( !strcasecmp( node->tag, C2SX( "svg" ) ) ) 
-				ctx->in_svg = true;
-			if ( !ctx->in_svg ) 
-				break;
-			DPRINT( "%s {\n", node->tag );
-			ctx_push( ctx );
-			// handle generic attributes (style, transform, ...)
-			parseGenAttr( ctx, node );
-
-			if ( 0 == strcasecmp( node->tag, C2SX( "g" ) ) )
-			{
-				// no special action for <g>roups yet
-			}
-			else if ( 0 == strcasecmp( node->tag, C2SX( "line" ) ) )
-			{
-				pmode( 1 );
-				x1 = ctx->x + getNumericAttr( node, C2SX( "x1" ) );
-				y1 = ctx->y + getNumericAttr( node, C2SX( "y1" ) );
-				x2 = ctx->x + getNumericAttr( node, C2SX( "x2" ) );
-				y2 = ctx->y + getNumericAttr( node, C2SX( "y2" ) );
-				emit( "m %g %g l %g %g", x1, y1, x2, y2 );
-			}
-			else if ( 0 == strcasecmp( node->tag, C2SX( "rect" ) ) )
-			{
-				pmode( 1 );
-				x1 = ctx->x + getNumericAttr( node, C2SX( "x" ) );
-				y1 = ctx->y + getNumericAttr( node, C2SX( "y" ) );
-				x2 = x1 + getNumericAttr( node, C2SX( "width" ) );
-				y2 = y1 + getNumericAttr( node, C2SX( "height" ) );
-				// TODO: evaluate rx,ry and emulate rounded rect using Bézier curves
-				emit( "m %g %g l %g %g %g %g %g %g", x1, y1, x2, y1, x2, y2, x1, y2 );
-			}
-			else if ( 0 == strcasecmp( node->tag, C2SX( "ellipse" ) )
-				   || 0 == strcasecmp( node->tag, C2SX( "circle" ) ) )
-			{
-				pmode( 1 );
-				cx = ctx->x + getNumericAttr( node, C2SX( "cx" ) );
-				cy = ctx->y + getNumericAttr( node, C2SX( "cy" ) );
-				if ( 0 == strcasecmp( node->tag, C2SX( "ellipse" ) ) )
-				{
-					rx = getNumericAttr( node, C2SX( "rx" ) );
-					ry = getNumericAttr( node, C2SX( "ry" ) );
-				}
-				else
-					rx = ry = getNumericAttr( node, C2SX( "r" ) );
-				/*
-				Approximate a circle using four Bézier curves:
-				P_0 = (0,1),  P_1 = (c,1),   P_2 = (1,c),   P_3 = (1,0)
-				P_0 = (1,0),  P_1 = (1,-c),  P_2 = (c,-1),  P_3 = (0,-1)
-				P_0 = (0,-1), P_1 = (-c,-1), P_2 = (-1,-c), P_3 = (-1,0)
-				P_0 = (-1,0), P_1 = (-1,c),  P_2 = (-c,1),  P_3 = (0,1)
-				with c = 0.551915024494
-				[ http://spencermortensen.com/articles/bezier-circle/ ]
-				*/
-				#define BEZIER_CIRC 	0.551915024494
-				double crx = rx * BEZIER_CIRC;
-				double cry = ry * BEZIER_CIRC;
-				x0 = cx;		y0 = cy + ry;
-				emit( "m %g %g ", x0, y0 );
-				x1 = cx + crx;	y1 = cy + ry;
-				x2 = cx + rx;	y2 = cy + cry;
-				x3 = cx + rx;	y3 = cy;
-				emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
-				x1 = cx + rx;	y1 = cy - cry;
-				x2 = cx + crx;	y2 = cy - ry;
-				x3 = cx;		y3 = cy - ry;
-				emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
-				x1 = cx - crx;	y1 = cy - ry;
-				x2 = cx - rx;	y2 = cy - cry;
-				x3 = cx - rx;	y3 = cy;
-				emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
-				x1 = cx - rx;	y1 = cy + cry;
-				x2 = cx - crx;	y2 = cy + ry;
-				x3 = cx;		y3 = cy + ry;
-				emit( "b %g %g %g %g %g %g", x1, y1, x2, y2, x3, y3 );
-			}
-			else if ( 0 == strcasecmp( node->tag, C2SX( "path" ) ) )
-			{
-				pmode( 1 );
-				parsePath( ctx, getStringAttr( node, C2SX( "d" ) ) );
-			}
-			else 
-			{
-				/* (yet) unhandled tags:
-				 * polyline, polygon: easily converted to SVG paths!
-				 * text: Forget it, why would you want to export SVG 
-				 *       text to ASS?!? (or simply convert to path)
-				 * clippath: maybe later, maybe never
-				 */
-			}
+	case NXML_EVT_OPEN:
+		if ( 0 == strcasecmp( node->name, "svg" ) ) 
+			ctx->in_svg = 1;
+		if ( !ctx->in_svg ) 
 			break;
+		DPRINT( "%s {\n", node->name );
+		ctx_push( ctx );
+		// handle generic attributes (style, transform, ...)
+		parseGenAttr( ctx, node );
 
-		case XML_EVENT_END_NODE:
-			if ( !strcasecmp( node->tag, C2SX( "svg" ) ) ) 
-				ctx->in_svg = false;
-			ctx_pop( ctx );
-			if ( !ctx->in_svg ) 
-				break;
-			DPRINT( "}\n" );
-			break;
+		if ( 0 == strcasecmp( node->name, "g" ) )
+		{
+			// no special action for <g>roups yet
+		}
+		else if ( 0 == strcasecmp( node->name,  "line" ) )
+		{
+			pmode( 1 );
+			x1 = ctx->x + getNumericAttr( node, "x1" );
+			y1 = ctx->y + getNumericAttr( node, "y1" );
+			x2 = ctx->x + getNumericAttr( node, "x2" );
+			y2 = ctx->y + getNumericAttr( node, "y2" );
+			emit( "m %g %g l %g %g ", x1, y1, x2, y2 );
+		}
+		else if ( 0 == strcasecmp( node->name, "rect" ) )
+		{
+			pmode( 1 );
+			x1 = ctx->x + getNumericAttr( node, "x" );
+			y1 = ctx->y + getNumericAttr( node, "y" );
+			x2 = x1 + getNumericAttr( node, "width" );
+			y2 = y1 + getNumericAttr( node, "height" );
+			// TODO: evaluate rx,ry and emulate rounded rect using Bézier curves
+			emit( "m %g %g l %g %g %g %g %g %g ", x1, y1, x2, y1, x2, y2, x1, y2 );
+		}
+		else if ( 0 == strcasecmp( node->name, "ellipse" )
+			   || 0 == strcasecmp( node->name, "circle" ) )
+		{
+			pmode( 1 );
+			cx = ctx->x + getNumericAttr( node, "cx" );
+			cy = ctx->y + getNumericAttr( node, "cy" );
+			if ( 0 == strcasecmp( node->name, "ellipse" ) )
+			{
+				rx = getNumericAttr( node, "rx" );
+				ry = getNumericAttr( node, "ry" );
+			}
+			else
+				rx = ry = getNumericAttr( node, "r" );
+			/*
+			Approximate a circle using four Bézier curves:
+			P_0 = (0,1),  P_1 = (c,1),   P_2 = (1,c),   P_3 = (1,0)
+			P_0 = (1,0),  P_1 = (1,-c),  P_2 = (c,-1),  P_3 = (0,-1)
+			P_0 = (0,-1), P_1 = (-c,-1), P_2 = (-1,-c), P_3 = (-1,0)
+			P_0 = (-1,0), P_1 = (-1,c),  P_2 = (-c,1),  P_3 = (0,1)
+			with c = 0.551915024494
+			[ http://spencermortensen.com/articles/bezier-circle/ ]
+			*/
+			#define BEZIER_CIRC 	0.551915024494
+			double crx = rx * BEZIER_CIRC;
+			double cry = ry * BEZIER_CIRC;
+			x0 = cx;		y0 = cy + ry;
+			emit( "m %g %g ", x0, y0 );
+			x1 = cx + crx;	y1 = cy + ry;
+			x2 = cx + rx;	y2 = cy + cry;
+			x3 = cx + rx;	y3 = cy;
+			emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
+			x1 = cx + rx;	y1 = cy - cry;
+			x2 = cx + crx;	y2 = cy - ry;
+			x3 = cx;		y3 = cy - ry;
+			emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
+			x1 = cx - crx;	y1 = cy - ry;
+			x2 = cx - rx;	y2 = cy - cry;
+			x3 = cx - rx;	y3 = cy;
+			emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
+			x1 = cx - rx;	y1 = cy + cry;
+			x2 = cx - crx;	y2 = cy + ry;
+			x3 = cx;		y3 = cy + ry;
+			emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
+		}
+		else if ( 0 == strcasecmp( node->name, "path" ) )
+		{
+			pmode( 1 );
+			parsePath( ctx, getStringAttr( node, "d" ) );
+		}
+		else 
+		{
+			/* (yet) unhandled tags:
+			 * polyline, polygon: easily converted to SVG paths!
+			 * text: Forget it, why would you want to export SVG 
+			 *       text to ASS?!? (or simply convert to path)
+			 * clippath: maybe later, maybe never
+			 */
+		}
+		break;
 
-		case XML_EVENT_TEXT:
-			/* Go away! */
+	case NXML_EVT_CLOSE:
+		if ( !strcasecmp( node->name, "svg" ) ) 
+			ctx->in_svg = 0;
+		ctx_pop( ctx );
+		if ( !ctx->in_svg ) 
 			break;
+		DPRINT( "}\n" );
+		break;
 
-		case XML_EVENT_ERROR:
-			sx_fprintf( stderr, C2SX( "%s: ERROR %d\n" ), text, n );
-			break;
-
-		default:
-			break;
+	default:
+		break;
 	}
 	if ( 1 == config.assfup )
 		pmode( 0 );
-	return true;
+	return 0;
 }
 
-int usage( char* progname )
+
+#define GET_LINE_INC	4000
+static size_t getLine( char **pbuf, size_t *psz, size_t off, const int dlm, FILE *pf )
+{
+	int c;
+	size_t x = 0;
+	char *buf = *pbuf;
+	size_t sz = *psz;
+	
+	while ( EOF != ( c = fgetc( pf ) ) )
+	{
+		if ( off + x + 1 >= sz )
+		{
+			char *p;
+			if ( NULL == ( p = realloc( buf, sz + GET_LINE_INC ) ) )
+				break;
+			*pbuf = buf = p;
+			*psz = sz += GET_LINE_INC;
+		}
+		buf[off + x++] = c;
+		if ( dlm == c )
+			break;
+	}
+	buf[off + x] = '\0';
+	return x;
+}
+
+static int parse( FILE *fp, SVGContext *ctx ) 
+{
+	int res;
+	char *buf = NULL;
+	size_t sz = 0;
+	size_t len = 0;
+	size_t n = 0;
+	
+	errno = 0;
+	while ( 0 < ( n = getLine( &buf, &sz, len, EOF, fp ) ) )
+		len += n;
+	if ( errno )
+	{
+		fprintf( stderr, "getLine: %s\n", strerror( errno ) );		
+		free( buf );
+		return -1;
+	}
+	memset( ctx, 0, sizeof *ctx );
+	res = nxmlParse( buf, svg2ass, ctx );
+	pmode( 0 );
+	emit( "\n" );
+	while ( 0 == ctx_pop( ctx ) )
+		;
+	free( buf );
+	return res;
+}
+
+static int usage( char* progname )
 {
 	char *p;
 	if ( NULL != ( p = strrchr( progname, '/' ) ) )
 		progname = ++p;
-	fprintf( stderr, "Usage: %s [options] svg_file [...]\n", progname );
+	fprintf( stderr, "Usage: %s [options] [svg_file ...]\n", progname );
 	fprintf( stderr,
+		" If no file is specified input is taken from stdin.\n"
 		" Options:\n"
 		"  -a ASS-fuckup mode: 0 = preserve layout (default), 1 = preserve colors\n"
 	);
@@ -599,12 +653,12 @@ int usage( char* progname )
 
 int main( int argc, char** argv )
 {
-	SAX_Callbacks sax;
 	SVGContext ctx_;
 	SVGContext *ctx = &ctx_;
 	int nfiles = 0;
 	int opt;
 	const char *ostr = "-:a:h";
+	FILE *fp;
 
 	while ( -1 != ( opt = getopt( argc, argv, ostr ) ) )
 	{
@@ -612,42 +666,48 @@ int main( int argc, char** argv )
 		{
 		case 1:
 			DPRINT( "parsing file '%s' ...\n", optarg );
-			memset( ctx, 0, sizeof *ctx );
-			SAX_Callbacks_init( &sax );
-			sax.all_event = svg2ass;
-			if ( true != XMLDoc_parse_file_SAX( optarg, &sax, ctx ) )
+			if ( NULL == ( fp = fopen( optarg, "r" ) ) )
+			{
+				fprintf( stderr, "fopen '%s': %s\n", optarg, strerror( errno ) );		
+				goto ERR0;
+			}
+			if ( 0 != parse( fp, ctx ) )
 			{
 				fprintf( stderr, "Error processing file '%s'\n", optarg );
-				goto ERR;
+				goto ERR0;
 			}
-			pmode( 0 );
-			emit( "\n" );
 			++nfiles;
-			while ( 0 == ctx_pop( ctx ) )
-				;
 			break;
 		case 'a':
 			config.assfup = atoi( optarg );
 			break;
+		case 'h':
+			usage( argv[0] );
+			exit( EXIT_SUCCESS );
+			break;
 		case ':':
 			fprintf( stderr, "Missing argument for option '%c'\n", optopt );
-			goto ERR;
+			goto ERR1;
 			break;
 		case '?':
 		default:
 			fprintf( stderr, "Unrecognized option '%c'\n", optopt );
-		case 'h':
-			goto ERR;
+		ERR1:
+			usage( argv[0] );
+		ERR0:
+			exit( EXIT_FAILURE );
 			break;
 		}
 	}
 	
-	if ( 0 >= nfiles )
+	if ( !nfiles )
 	{
-		fprintf( stderr, "No files to process\n" );
-	ERR:
-		usage( argv[0] );
-		exit( EXIT_FAILURE );
+		DPRINT( "parsing stdin ...\n" );
+		if ( 0 != parse( stdin, ctx ) )
+		{
+			fprintf( stderr, "Error processing stdin'\n" );
+			goto ERR0;
+		}
 	}
 	exit( EXIT_SUCCESS );
 }
