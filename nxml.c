@@ -219,6 +219,7 @@ int nxmlParse( char *buf, nxmlCb_t cb, void *usr )
 	{
 		p = m;
 		node.name = "";
+		node.att_num = 0;
 		node.error = 0;
 		switch ( state )
 		{

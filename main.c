@@ -171,7 +171,11 @@ static inline const char *getStringAttr( const nxmlNode_t *node, char *attr )
 
 static int parseGenAttr( SVGContext *ctx, const nxmlNode_t *node )
 {
-	parseStyles( ctx, getStringAttr( node, "style" ) );
+	const char *s;
+
+	s = getStringAttr( node, "style" );
+	if ( *s )
+		parseStyles( ctx, s );
 	
 	// TODO: transform --> ctx->x,y
 	
