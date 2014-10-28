@@ -9,6 +9,7 @@ LD      = gcc
 LIBS    =
 LDFLAGS = $(LIBS)
 RM      = rm -f
+STRIP	= strip -s
 
 PRJ     = svg2ass
 SRC     = $(wildcard *.c)
@@ -16,9 +17,14 @@ OBJ     = $(SRC:%.c=%.o)
 BIN     = $(PRJ)
 DEP     = $(PRJ).dep
 
-.PHONY: all clean dep
+.PHONY: all debug clean dep
 
+all: CFLAGS += -DNDEBUG
 all: dep $(BIN)
+	$(STRIP) $(BIN)
+
+debug: CFLAGS += -DDEBUG -g3
+debug: dep $(BIN)
 
 dep:
 	$(CC) -MM $(SRC) > $(DEP)

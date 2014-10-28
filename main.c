@@ -31,25 +31,17 @@
 #include "colors.h"
 
 
-#if (defined(WIN32) || defined(WIN64)) && !defined(strcasecmp)
-#ifdef SXMLC_UNICODE
-#define strcasecmp _wcsicmp
-#else
-#define strcasecmp _strcmpi
-#endif
-#endif
-
-//#define  DEBUG		// belongs in Makefile
-
 #ifdef DEBUG
 #define WHOAMI()		fprintf( stderr, "%s:%d:%s\n", __FILE__, __LINE__, __func__ )
-#define DPRINT(...)		do { \
+#define DPRINT(...)		do { fprintf( stderr, __VA_ARGS__ ); } while(0)
+#define IPRINT(...)		do { \
 							fprintf( stderr, "%*s", (ctx->indent * 4), "" ); \
 							fprintf( stderr, __VA_ARGS__ ); \
 						} while(0)
 #else
 #define WHOAMI()
 #define DPRINT(...)
+#define IPRINT(...)
 #endif
 
 
@@ -120,7 +112,7 @@ static int parseStyles( SVGContext *ctx, const char *style )
 	s = style;
 	while ( sscanf( s, "%99[^:]:%99[^;];%n", name, value, &n ) == 2 )
 	{   
-		//DPRINT( "%s=%s\n", name, value );
+		//IPRINT( "%s=%s\n", name, value );
 		if ( 0 == strcasecmp( name, "fill" ) && 0 != strcasecmp( value, "none" ) )
 		{
 			nocol &= ~1;
@@ -165,19 +157,6 @@ static inline int findAttr( const nxmlNode_t *node, const char *name )
 	return -1;
 }
 
-static int parseGenAttr( SVGContext *ctx, const nxmlNode_t *node )
-{
-	int a;
-	
-	a = findAttr( node, "style" );
-	if ( 0 <= a )
-		parseStyles( ctx, node->att[a].val );
-	
-	// TODO: transform --> ctx->x,y
-	
-	return 0;
-}
-
 static inline double getNumericAttr( const nxmlNode_t *node, char *attr )
 {
 	int a = findAttr( node, attr );
@@ -188,6 +167,15 @@ static inline const char *getStringAttr( const nxmlNode_t *node, char *attr )
 {
 	int a = findAttr( node, attr );
 	return ( 0 <= a ) ? node->att[a].val : "";
+}
+
+static int parseGenAttr( SVGContext *ctx, const nxmlNode_t *node )
+{
+	parseStyles( ctx, getStringAttr( node, "style" ) );
+	
+	// TODO: transform --> ctx->x,y
+	
+	return 0;
 }
 
 /*
@@ -242,12 +230,12 @@ static int parsePath( SVGContext *ctx, const char *pd )
 			char ass_cmd;
 			if ( *svg_cmd == 'M' || *svg_cmd == 'm' )
 			{
-				DPRINT( "moveto\n" );
+				IPRINT( "moveto\n" );
 				ass_cmd = 'm';
 			}
 			else
 			{
-				DPRINT( "lineto\n" );
+				IPRINT( "lineto\n" );
 				ass_cmd = 'l';
 			}
 			do 
@@ -274,7 +262,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		/* closepath (Z, z) (no arguments) */
 		else if ( sscanf(s, " %1[Zz] %n", svg_cmd, &n) == 1 ) 
 		{
-			DPRINT( "closepath\n" );
+			IPRINT( "closepath\n" );
 			// in ASS paths are automatically closed
 			// IOW: there are no "open" paths, only closed shapes!
 			s += n;
@@ -284,7 +272,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		/* horizontal lineto (H, h) (1 argument) */
 		else if ( sscanf( s, " %1[Hh]%f %n", svg_cmd, &x, &n ) == 2 ) 
 		{
-			DPRINT( "h-lineto\n" );
+			IPRINT( "h-lineto\n" );
 			emit( "l " );
 			y = last_y;
 			do 
@@ -300,7 +288,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		/* vertical lineto (V, v) (1 argument) */
 		else if ( sscanf( s, " %1[Vv]%f %n", svg_cmd, &y, &n ) == 2 ) 
 		{
-			DPRINT( "v-lineto\n" );
+			IPRINT( "v-lineto\n" );
 			emit( "l " );
 			x = last_x;
 			do 
@@ -317,7 +305,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		else if ( sscanf( s, " %1[Cc]%f%f%f%f%f%f %n", svg_cmd, 
 					&x1, &y1, &x2, &y2, &x, &y, &n ) == 7 ) 
 		{
-			DPRINT( "c-bezier\n" );
+			IPRINT( "c-bezier\n" );
 			do 
 			{
 				emit( "b " );
@@ -344,7 +332,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		else if ( sscanf(s, " %1[Ss]%f%f%f%f %n", svg_cmd,
 					&x2, &y2, &x, &y, &n) == 5 ) 
 		{
-			DPRINT( "s-bezier\n" );
+			IPRINT( "s-bezier\n" );
 			do 
 			{
 				emit( "b " );
@@ -371,7 +359,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		else if ( sscanf( s, " %1[Qq]%f%f%f%f %n", svg_cmd,
 					&x1, &y1, &x, &y, &n ) == 5 ) 
 		{
-			DPRINT( "q-bezier\n" );
+			IPRINT( "q-bezier\n" );
 			do 
 			{
 				emit( "b " );
@@ -399,7 +387,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		/* shorthand/smooth quadratic curveto (T, t) (2 arguments) */
 		else if ( sscanf( s, " %1[Tt]%f%f %n", svg_cmd,	&x, &y, &n ) == 3 ) 
 		{
-			DPRINT( "t-bezier\n" );
+			IPRINT( "t-bezier\n" );
 			do 
 			{
 				emit( "b " );
@@ -430,7 +418,7 @@ static int parsePath( SVGContext *ctx, const char *pd )
 		else if ( sscanf( s, " %1[Aa]%f%f%f%f%f%f%f %n", svg_cmd,
 				&rx, &ry, &rot, &larc, &swp, &x, &y, &n ) == 8 ) 
 		{
-			DPRINT( "path arc not implemented!\n" );
+			IPRINT( "path arc not implemented!\n" );
 			do 
 			{
 				// TODO: is there a sane way to do arcs with B-curves?
@@ -478,7 +466,7 @@ int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 			ctx->in_svg = 1;
 		if ( !ctx->in_svg ) 
 			break;
-		DPRINT( "%s {\n", node->name );
+		IPRINT( "%s {\n", node->name );
 		ctx_push( ctx );
 		// handle generic attributes (style, transform, ...)
 		parseGenAttr( ctx, node );
@@ -572,7 +560,7 @@ int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 		ctx_pop( ctx );
 		if ( !ctx->in_svg ) 
 			break;
-		DPRINT( "}\n" );
+		IPRINT( "}\n" );
 		break;
 
 	default:
@@ -583,31 +571,31 @@ int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 	return 0;
 }
 
-
-#define GET_LINE_INC	4000
-static size_t getLine( char **pbuf, size_t *psz, size_t off, const int dlm, FILE *pf )
+static int getFile( char **pbuf, size_t *psz, size_t inc, FILE *pf )
 {
-	int c;
-	size_t x = 0;
+	size_t x = 0, n;
 	char *buf = *pbuf;
-	size_t sz = *psz;
 	
-	while ( EOF != ( c = fgetc( pf ) ) )
+	do
 	{
-		if ( off + x + 1 >= sz )
+		if ( x + inc + 1 >= *psz )
 		{
-			char *p;
-			if ( NULL == ( p = realloc( buf, sz + GET_LINE_INC ) ) )
-				break;
-			*pbuf = buf = p;
-			*psz = sz += GET_LINE_INC;
+			if ( NULL == ( buf = realloc( buf, *psz + inc + 1 ) ) )
+				return -1;
+			*pbuf = buf;
+			*psz += inc + 1;
 		}
-		buf[off + x++] = c;
-		if ( dlm == c )
-			break;
+		n = fread( buf + x, 1, inc, pf );
+		x += n;
 	}
-	buf[off + x] = '\0';
-	return x;
+	while ( 0 < n );
+	buf[x++] = '\0';
+	if ( x < *psz && NULL != ( buf = realloc( buf, x ) ) )
+	{
+		*pbuf = buf;
+		*psz = x;
+	}
+	return ferror( pf );
 }
 
 static int parse( FILE *fp, SVGContext *ctx ) 
@@ -615,15 +603,10 @@ static int parse( FILE *fp, SVGContext *ctx )
 	int res;
 	char *buf = NULL;
 	size_t sz = 0;
-	size_t len = 0;
-	size_t n = 0;
 	
-	errno = 0;
-	while ( 0 < ( n = getLine( &buf, &sz, len, EOF, fp ) ) )
-		len += n;
-	if ( errno )
+	if ( 0 != getFile( &buf, &sz, 4000, fp ) )
 	{
-		fprintf( stderr, "getLine: %s\n", strerror( errno ) );		
+		fprintf( stderr, "getLine: %s\n", strerror( errno ) );
 		free( buf );
 		return -1;
 	}
@@ -653,8 +636,7 @@ static int usage( char* progname )
 
 int main( int argc, char** argv )
 {
-	SVGContext ctx_;
-	SVGContext *ctx = &ctx_;
+	SVGContext ctx;
 	int nfiles = 0;
 	int opt;
 	const char *ostr = "-:a:h";
@@ -671,7 +653,7 @@ int main( int argc, char** argv )
 				fprintf( stderr, "fopen '%s': %s\n", optarg, strerror( errno ) );		
 				goto ERR0;
 			}
-			if ( 0 != parse( fp, ctx ) )
+			if ( 0 != parse( fp, &ctx ) )
 			{
 				fprintf( stderr, "Error processing file '%s'\n", optarg );
 				goto ERR0;
@@ -703,7 +685,7 @@ int main( int argc, char** argv )
 	if ( !nfiles )
 	{
 		DPRINT( "parsing stdin ...\n" );
-		if ( 0 != parse( stdin, ctx ) )
+		if ( 0 != parse( stdin, &ctx ) )
 		{
 			fprintf( stderr, "Error processing stdin'\n" );
 			goto ERR0;

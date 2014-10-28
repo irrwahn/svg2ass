@@ -14,7 +14,7 @@
 
 #include "nxml.h"
 
-//#define DEBUG
+
 #ifdef DEBUG
 #include <assert.h>
 #define WHOAMI() 	fprintf( stderr, "%d %s\n", __LINE__, __func__ ); 
