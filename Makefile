@@ -4,7 +4,7 @@
 
 CC      := gcc
 INCS    =
-CFLAGS  = $(INCS) -W -Wall -O2 -std=c99 -D_POSIX_C_SOURCE=200809L
+CFLAGS  = $(INCS) -W -Wall -std=c99 -D_POSIX_C_SOURCE=200809L
 LD      = gcc
 LIBS    =
 LDFLAGS = $(LIBS)
@@ -19,11 +19,11 @@ DEP     = $(PRJ).dep
 
 .PHONY: all debug clean dep
 
-all: CFLAGS += -DNDEBUG
+all: CFLAGS += -O2 -DNDEBUG
 all: dep $(BIN)
 	$(STRIP) $(BIN)
 
-debug: CFLAGS += -DDEBUG -g3
+debug: CFLAGS += -O0 -DDEBUG -g3
 debug: dep $(BIN)
 
 dep:

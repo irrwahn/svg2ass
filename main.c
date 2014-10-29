@@ -13,7 +13,8 @@
  *  - rounded rects? (c'mon, object-to-path is your friend!)
  * 
  * Notes:
- *  - Unicode support is utterly borked, and I couldn't care less.
+ *  - Unicode support is utterly borked (though UTF-8 should be fine), 
+ *    and I couldn't care less.
  *  - The more you "flatten" your SVG (objects to paths, no layering, 
  *    etc. ) the better the chances are to get an acceptable result.
  */
@@ -23,15 +24,18 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <errno.h>
 
 #include <unistd.h>
 
 #include "nxml.h"
 #include "colors.h"
+#include "vect.h"
 
 
 #ifdef DEBUG
+#include <assert.h>
 #define WHOAMI()		fprintf( stderr, "%s:%d:%s\n", __FILE__, __LINE__, __func__ )
 #define DPRINT(...)		do { fprintf( stderr, __VA_ARGS__ ); } while(0)
 #define IPRINT(...)		do { \
@@ -39,45 +43,47 @@
 							fprintf( stderr, __VA_ARGS__ ); \
 						} while(0)
 #else
+#define assert(...)
 #define WHOAMI()
 #define DPRINT(...)
 #define IPRINT(...)
 #endif
 
 
-#define emit(...)		fprintf( stdout, __VA_ARGS__ )
-
-
-/*
- *  Config
+/************************************************************
+ *	Config stuff
  */
  
  static struct {
-	 int assfup;
- } config;
+	int ass_fup;
+	int ass_fprec;
+	FILE *of;
+ } config = {
+	0,
+	1,
+	NULL,
+};
 
-/*
- * Context stack crap
+
+/************************************************************
+ *	Context stuff
  */
 
-#define CTX_STACK_SIZE	1024
+#define CTX_STACK_SIZE	1024	// maximum nesting level supported
 
-typedef 
-	struct _SVGContext 
-	SVGContext;
-
-struct _SVGContext {
+typedef struct {
 	int in_svg;
-	int x, y;
+	vec_t o;		// origin
+	mtx_t m;		// current transformation matrix (CTM)
 #ifdef DEBUG
 	int indent;
 #endif
-};
+} ctx_t;
 
-static SVGContext stack[CTX_STACK_SIZE];
+static ctx_t stack[CTX_STACK_SIZE];
 static int stackp = 0;
 
-static int ctx_push( SVGContext *ctx )
+static int ctx_push( ctx_t *ctx )
 {
 	if ( stackp >= CTX_STACK_SIZE - 1 )
 		return -1;
@@ -88,28 +94,149 @@ static int ctx_push( SVGContext *ctx )
 	return 0;
 }
 	
-static int ctx_pop( SVGContext *ctx )
+static int ctx_pop( ctx_t *ctx )
 {
 	if ( stackp < 1 )
 		return -1;
 	*ctx = stack[--stackp];
 	return 0;
 }
+	
 
-/*
- * Parse generic attributes
+/************************************************************
+ *	ASS output generator
  */
-static int parseStyles( SVGContext *ctx, const char *style )
+
+#define ASS_FPREC	3
+
+#if 0
+int emit( const char *fmt, ... )
+{
+	int r;
+	va_list arglist;
+
+	va_start( arglist, fmt );
+	r = vfprintf( config.of, fmt, arglist );
+	va_end( arglist );
+	return r < 0 ? -1 : 0;
+}
+#else
+#define emit(...)	(0>fprintf(config.of,__VA_ARGS__)?-1:0)
+#endif
+
+static inline const char *ftoa( double d )
+{
+	static char buf[50];
+	char *b;
+
+	sprintf( buf, "%0.*f", config.ass_fprec, d );
+	if ( strchr( buf, '.' ) )
+	{
+		b = buf + strlen( buf ) - 1;
+		while ( '0' == *b )
+			*b-- = '\0';
+		if ( '.' == *b )
+			*b = '\0';
+	}
+	return buf;
+}
+
+int emitf( ctx_t *ctx, const char *fmt, ... )
+{
+	int r = 0;
+	const char *p;
+	va_list arglist;
+	vec_t v;
+	
+	va_start( arglist, fmt );
+	for ( p = fmt; *p && 0 == r; ++p )
+	{
+		if ( '%' == *p )
+		{
+			++p;
+			switch( tolower( *p ) )
+			{
+			case 'e': case 'f': case 'g':
+				r = emit( "%s", ftoa( va_arg( arglist, double ) ) );
+				break;
+			case 'v': 
+				v = va_arg( arglist, vec_t );
+				v = mtx_vmul( ctx->m, v );
+				r = emit( "%s ", ftoa( v.x ) );
+				r = emit( "%s", ftoa( v.y ) );
+				break;
+			case '%':
+				r = emit( "%%" );
+				break;
+			default:
+				r = -1; 
+				assert( 1 == 0 );
+				break;
+			}
+		}
+		else
+			r = emit( "%c", *p );
+	}
+	va_end( arglist );
+	return r;
+}
+
+// Enable / disable ASS drawing mode
+static inline int pmode( int x )
+{
+	static int en = 0;
+	if ( en && !x ) 
+	{
+		emit( "{\\p0}" );
+		en = 0; 
+	}
+	else if ( !en && x )
+	{
+		emit( "{\\shad0\\an7\\p1}" ); 
+		en = 1; 
+	}
+	return en;
+}
+
+
+/************************************************************
+ *	Parse attributes
+ */
+ 
+static inline int findAttr( const nxmlNode_t *node, const char *name )
+{
+	int a;
+	for ( a = 0; a < (int)node->att_num; ++a )
+		if ( 0 == strcasecmp( node->att[a].name, name ) )
+			return a;
+	return -1;
+}
+
+static inline double getNumericAttr( const nxmlNode_t *node, char *attr )
+{
+	int a = findAttr( node, attr );
+	return ( 0 <= a ) ? strtod( node->att[a].val, NULL ) : 0.0;
+}
+
+static inline const char *getStringAttr( const nxmlNode_t *node, char *attr )
+{
+	int a = findAttr( node, attr );
+	return ( 0 <= a ) ? node->att[a].val : NULL;
+}
+
+static int parseStyles( ctx_t *ctx, const char *style )
 {
 	int n = 0;
 	int nocol = 3;
 	unsigned fill_col = 0, fill_a = 0, stroke_col = 0, stroke_a = 0;
 	double stroke_wid = 1;
-	const char *s;
+	const char *s = style;
 	char name[100];
 	char value[100];
-
-	s = style;
+	
+	if ( !s || !*s )
+		return 0;
+	IPRINT( "style\n" );
 	while ( sscanf( s, "%99[^:]:%99[^;];%n", name, value, &n ) == 2 )
 	{   
 		//IPRINT( "%s=%s\n", name, value );
@@ -142,77 +269,122 @@ static int parseStyles( SVGContext *ctx, const char *style )
 	emit( "\\1a&H%02X&", fill_a );
 	emit( "\\3c&H%06X&", stroke_col );
 	emit( "\\3a&H%02X&", stroke_a );
-	emit( "\\bord%g", stroke_wid );
+	emitf( ctx, "\\bord%g", stroke_wid );
 	emit( "}" );
-	(void)ctx;
 	return 0;
 }
 
-static inline int findAttr( const nxmlNode_t *node, const char *name )
+static int parseTransform( ctx_t *ctx, const char *trans )
 {
-	int a;
-	for ( a = 0; a < (int)node->att_num; ++a )
-		if ( 0 == strcasecmp( node->att[a].name, name ) )
-			return a;
-	return -1;
-}
-
-static inline double getNumericAttr( const nxmlNode_t *node, char *attr )
-{
-	int a = findAttr( node, attr );
-	return ( 0 <= a ) ? strtod( node->att[a].val, NULL ) : 0.0;
-}
-
-static inline const char *getStringAttr( const nxmlNode_t *node, char *attr )
-{
-	int a = findAttr( node, attr );
-	return ( 0 <= a ) ? node->att[a].val : "";
-}
-
-static int parseGenAttr( SVGContext *ctx, const nxmlNode_t *node )
-{
+	int n;
 	const char *s;
-
-	s = getStringAttr( node, "style" );
-	if ( *s )
-		parseStyles( ctx, s );
+	mtx_t m;
 	
-	// TODO: transform --> ctx->x,y
+	if ( !trans || !*trans )
+		return 0;
 	
+	IPRINT( "transform\n" );
+	m = MTX_UNI;
+	if ( NULL != ( s = strstr( trans, "scale" ) ) )
+	{
+		n = sscanf( s + 5, " (%lf ,%lf )", &m.a, &m.d );
+		if ( 0 < n )
+		{
+			if ( 1 == n )
+				m.d = m.a;
+			ctx->m = m;//mtx_mmul( m, ctx->m );
+		}
+		m = MTX_UNI;
+	}
+	if ( NULL != ( s = strstr( trans, "translate" ) ) )
+	{
+		n = sscanf( s + 9, " (%lf ,%lf )", &m.e, &m.f );
+		if ( 0 < n )
+		{	
+			m.a = m.d = 1.;
+			ctx->m = m;//mtx_mmul( m, ctx->m );
+		}
+		m = MTX_UNI;
+	}
+	if ( NULL != ( s = strstr( trans, "matrix" ) ) )
+	{
+		n = sscanf( s + 6, " (%lf ,%lf ,%lf ,%lf ,%lf ,%lf )", 
+				&m.a, &m.b, &m.c, &m.d, &m.e, &m.f );
+		if ( 6 == n )
+		{	
+			ctx->m = m;//mtx_mmul( m, ctx->m );
+		}
+		m = MTX_UNI;
+	}
 	return 0;
 }
 
-/*
- * Enable / disable ASS drawing mode
+
+/************************************************************
+ *	ASS drawing stuff and SVG parsing
  */
-static inline int pmode( int x )
+
+#define BEZIER_CIRC 	0.551915024494
+
+static int ass_ellipse( ctx_t *ctx, vec_t c, vec_t r )
 {
-	static int en = 0;
-	if ( en && !x ) 
-	{
-		emit( "{\\p0}" );
-		en = 0; 
-	}
-	else if ( !en && x )
-	{
-		emit( "{\\shad0\\an7\\p1}" ); 
-		en = 1; 
-	}
-	return en;
+	/*
+	Approximate a circle using four Bézier curves:
+	P_0 = (0,1),  P_1 = (c,1),   P_2 = (1,c),   P_3 = (1,0)
+	P_0 = (1,0),  P_1 = (1,-c),  P_2 = (c,-1),  P_3 = (0,-1)
+	P_0 = (0,-1), P_1 = (-c,-1), P_2 = (-1,-c), P_3 = (-1,0)
+	P_0 = (-1,0), P_1 = (-1,c),  P_2 = (-c,1),  P_3 = (0,1)
+	with c = 0.551915024494
+	[ http://spencermortensen.com/articles/bezier-circle/ ]
+	*/
+	vec_t v0, v1, v2, v3;
+	vec_t rq = vec_scal( r, BEZIER_CIRC );
+	
+	v0.x = c.x;			v0.y = c.y + r.y;
+	emitf( ctx, "m %v ", v0 );
+	v1.x = c.x + rq.x;	v1.y = c.y + r.y;
+	v2.x = c.x + r.x;	v2.y = c.y + rq.y;
+	v3.x = c.x + r.x;	v3.y = c.y;
+	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
+	v1.x = c.x + r.x;	v1.y = c.y - rq.y;
+	v2.x = c.x + rq.x;	v2.y = c.y - r.y;
+	v3.x = c.x;			v3.y = c.y - r.y;
+	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
+	v1.x = c.x - rq.x;	v1.y = c.y - r.y;
+	v2.x = c.x - r.x;	v2.y = c.y - rq.y;
+	v3.x = c.x - r.x;	v3.y = c.y;
+	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
+	v1.x = c.x - r.x;	v1.y = c.y + rq.y;
+	v2.x = c.x - rq.x;	v2.y = c.y + r.y;
+	v3.x = c.x;			v3.y = c.y + r.y;
+	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
+	return 0;
+}
+
+static int ass_arc( ctx_t *ctx, vec_t v0, vec_t r, double rot, int larc, int swp, vec_t v )
+{
+#if 0
+	// TODO: draw elliptical arc using cubic Bézier curves. Ugh!
+#else
+	IPRINT( "path arc not implemented!\n" );
+	emitf( ctx, "l %v ", v );
+	(void)v0; (void)r; (void)rot; (void)larc; (void)swp; 
+#endif
+	return 0;
 }
 
 /*
  * Path parser logic shamelessly stolen from libsvgtiny:
  * http://www.netsurf-browser.org/projects/libsvgtiny/
  */
-static int parsePath( SVGContext *ctx, const char *pd )
+static int parsePath( ctx_t *ctx, const char *pd )
 {
 	int res = 0;
 	char *s, *d;
-	double last_x = ctx->x, last_y = ctx->y;
-	double last_cubic_x = 0, last_cubic_y = 0;
-	double last_quad_x = 0, last_quad_y = 0;
-	double subpath_first_x = 0, subpath_first_y = 0;
+	vec_t last = ctx->o;
+	vec_t last_cubic = last;
+	vec_t last_quad = last;
+	vec_t subpath_first = last;
 
 	/* obtain a clean copy of path */
 	if ( NULL == ( d = strdup( pd ) ) )
@@ -225,11 +397,12 @@ static int parsePath( SVGContext *ctx, const char *pd )
 	{
 		int n;
 		char svg_cmd[2] = "";
-		float x, y, x1, y1, x2, y2;
-		float rx, ry, rot, larc, swp;
+		vec_t v, v1, v2, r;
+		double rot;
+		int larc, swp;
 
 		/* moveto (M, m), lineto (L, l) (2 arguments) */
-		if ( sscanf( s, " %1[MmLl]%f%f %n", svg_cmd, &x, &y, &n) == 3 ) 
+		if ( sscanf( s, " %1[MmLl]%lf%lf %n", svg_cmd, &v.x, &v.y, &n ) == 3 ) 
 		{
 			char ass_cmd;
 			if ( *svg_cmd == 'M' || *svg_cmd == 'm' )
@@ -246,22 +419,15 @@ static int parsePath( SVGContext *ctx, const char *pd )
 			{
 				emit( "%c ", ass_cmd );
 				if ( *svg_cmd == 'l' || *svg_cmd == 'm' )
-				{
-					x += last_x;
-					y += last_y;
-				}
+					v = vec_add( v, last );
 				if ( ass_cmd == 'm' ) 
-				{
-					subpath_first_x = x;
-					subpath_first_y = y;
-				}
-				emit( "%g %g ", x, y );
-				last_cubic_x = last_quad_x = last_x = x;
-				last_cubic_y = last_quad_y = last_y = y;
+					subpath_first = v;
+				emitf( ctx, "%v ", v );
+				last_cubic = last_quad = last = v;
 				s += n;
 				ass_cmd = 'l';
 			} 
-			while ( sscanf( s, "%f%f %n", &x, &y, &n ) == 2 );
+			while ( sscanf( s, "%lf%lf %n", &v.x, &v.y, &n ) == 2 );
 		}
 		/* closepath (Z, z) (no arguments) */
 		else if ( sscanf(s, " %1[Zz] %n", svg_cmd, &n) == 1 ) 
@@ -270,175 +436,141 @@ static int parsePath( SVGContext *ctx, const char *pd )
 			// in ASS paths are automatically closed
 			// IOW: there are no "open" paths, only closed shapes!
 			s += n;
-			last_cubic_x = last_quad_x = last_x = subpath_first_x;
-			last_cubic_y = last_quad_y = last_y = subpath_first_y;
+			last_cubic = last_quad = last = subpath_first;
 		}
 		/* horizontal lineto (H, h) (1 argument) */
-		else if ( sscanf( s, " %1[Hh]%f %n", svg_cmd, &x, &n ) == 2 ) 
+		else if ( sscanf( s, " %1[Hh]%lf %n", svg_cmd, &v.x, &n ) == 2 ) 
 		{
 			IPRINT( "h-lineto\n" );
 			emit( "l " );
-			y = last_y;
+			v.y = last.y;
 			do 
 			{
 				if ( *svg_cmd == 'h' )
-					x += last_x;
-				emit( "%g %g ", x, y );
-				last_cubic_x = last_quad_x = last_x	= x;
+					v.x += last.x;
+				emitf( ctx, "%v ", v );
+				last_cubic = last_quad = last = v;
 				s += n;
 			} 
-			while ( sscanf( s, "%f %n", &x, &n ) == 1 );
+			while ( sscanf( s, "%lf %n", &v.x, &n ) == 1 );
 		}
 		/* vertical lineto (V, v) (1 argument) */
-		else if ( sscanf( s, " %1[Vv]%f %n", svg_cmd, &y, &n ) == 2 ) 
+		else if ( sscanf( s, " %1[Vv]%lf %n", svg_cmd, &v.y, &n ) == 2 ) 
 		{
 			IPRINT( "v-lineto\n" );
 			emit( "l " );
-			x = last_x;
+			v.x = last.x;
 			do 
 			{
 				if ( *svg_cmd == 'v' )
-					y += last_y;
-				emit( "%g %g ", x, y );
-				last_cubic_y = last_quad_y = last_y	= y;
+					v.y += last.y;
+				emitf( ctx, "%v ", v );
+				last_cubic = last_quad = last = v;
 				s += n;
 			} 
-			while ( sscanf( s, "%f %n", &x, &n ) == 1 );
+			while ( sscanf( s, "%lf %n", &v.x, &n ) == 1 );
 		}
 		/* cubic Bézier curveto (C, c) (6 arguments) */
-		else if ( sscanf( s, " %1[Cc]%f%f%f%f%f%f %n", svg_cmd, 
-					&x1, &y1, &x2, &y2, &x, &y, &n ) == 7 ) 
+		else if ( sscanf( s, " %1[Cc]%lf%lf%lf%lf%lf%lf %n", svg_cmd, 
+					&v1.x, &v1.y, &v2.x, &v2.y, &v.x, &v.y, &n ) == 7 ) 
 		{
 			IPRINT( "c-bezier\n" );
 			do 
 			{
-				emit( "b " );
 				if ( *svg_cmd == 'c' ) 
 				{
-					x1 += last_x;
-					y1 += last_y;
-					x2 += last_x;
-					y2 += last_y;
-					x += last_x;
-					y += last_y;
+					v1 = vec_add( v1, last );
+					v2 = vec_add( v2, last );
+					v  = vec_add( v , last );
 				}
-				emit( "%g %g %g %g %g %g ", x1, y1, x2, y2, x, y );
-				last_cubic_x = x2;
-				last_cubic_y = y2;
-				last_quad_x = last_x = x;
-				last_quad_y = last_y = y;
+				emitf( ctx, "b %v %v %v ", v1, v2, v );
+				last_cubic = v2;
+				last_quad = last = v;
 				s += n;
 			} 
-			while ( sscanf( s, "%f%f%f%f%f%f %n", 
-						&x1, &y1, &x2, &y2, &x, &y, &n ) == 6 );
+			while ( sscanf( s, "%lf%lf%lf%lf%lf%lf %n", 
+						&v1.x, &v1.y, &v2.x, &v2.y, &v.x, &v.y, &n ) == 6 );
 		}
 		/* shorthand/smooth cubic curveto (S, s) (4 arguments) */
-		else if ( sscanf(s, " %1[Ss]%f%f%f%f %n", svg_cmd,
-					&x2, &y2, &x, &y, &n) == 5 ) 
+		else if ( sscanf(s, " %1[Ss]%lf%lf%lf%lf %n", svg_cmd,
+					&v2.x, &v2.y, &v.x, &v.y, &n) == 5 ) 
 		{
 			IPRINT( "s-bezier\n" );
 			do 
 			{
-				emit( "b " );
-				x1 = last_x + ( last_x - last_cubic_x );
-				y1 = last_y + ( last_y - last_cubic_y );
+				v1 = vec_add( last, vec_sub( last, last_cubic ) );
 				if ( *svg_cmd == 's' ) 
 				{
-					x2 += last_x;
-					y2 += last_y;
-					x += last_x;
-					y += last_y;
+					v2 = vec_add( v2, last );
+					v = vec_add( v, last );
 				}
-				emit( "%g %g %g %g %g %g ", x1, y1, x2, y2, x, y );
-				last_cubic_x = x2;
-				last_cubic_y = y2;
-				last_quad_x = last_x = x;
-				last_quad_y = last_y = y;
+				emitf( ctx, "b %v %v %v ", v1, v2, v );
+				last_cubic = v2;
+				last_quad = last = v;
 				s += n;
 			} 
-			while (sscanf(s, "%f%f%f%f %n",
-						&x2, &y2, &x, &y, &n) == 4);
+			while (sscanf(s, "%lf%lf%lf%lf %n",
+						&v2.x, &v2.y, &v.x, &v.y, &n) == 4);
 		}
 		/* quadratic Bezier curveto (Q, q) (4 arguments) */
-		else if ( sscanf( s, " %1[Qq]%f%f%f%f %n", svg_cmd,
-					&x1, &y1, &x, &y, &n ) == 5 ) 
+		else if ( sscanf( s, " %1[Qq]%lf%lf%lf%lf %n", svg_cmd,
+					&v1.x, &v1.y, &v.x, &v.y, &n ) == 5 ) 
 		{
 			IPRINT( "q-bezier\n" );
 			do 
 			{
-				emit( "b " );
-				last_quad_x = x1;
-				last_quad_y = y1;
+				last_quad = v;
 				if ( *svg_cmd == 'q' ) 
 				{
-					x1 += last_x;
-					y1 += last_y;
-					x += last_x;
-					y += last_y;
+					v1 = vec_add( v1, last );
+					v = vec_add( v, last );
 				}
-				emit( "%g %g %g %g %g %g ",
-					1./3 * last_x + 2./3 * x1,
-					1./3 * last_y + 2./3 * y1,
-					2./3 * x1 + 1./3 * x,
-					2./3 * y1 + 1./3 * y,
-					x, y );
-				last_cubic_x = last_x = x;
-				last_cubic_y = last_y = y;
+				emitf( ctx, "b %v %v %v ",
+					vec_add( vec_scal( last, 1./3 ), vec_scal( v1, 2./3 ) ),
+					vec_add( vec_scal( v1, 2./3 ), vec_scal( v, 1./3 ) ),
+					v );
+				last_cubic = last = v;
 				s += n;
 			} 
-			while ( sscanf( s, "%f%f%f%f %n", &x1, &y1, &x, &y, &n) == 4 );
+			while ( sscanf( s, "%lf%lf%lf%lf %n", &v1.x, &v1.y, &v.x, &v.y, &n) == 4 );
 		}
 		/* shorthand/smooth quadratic curveto (T, t) (2 arguments) */
-		else if ( sscanf( s, " %1[Tt]%f%f %n", svg_cmd,	&x, &y, &n ) == 3 ) 
+		else if ( sscanf( s, " %1[Tt]%lf%lf %n", svg_cmd,	&v.x, &v.y, &n ) == 3 ) 
 		{
 			IPRINT( "t-bezier\n" );
 			do 
 			{
-				emit( "b " );
-				x1 = last_x + ( last_x - last_quad_x );
-				y1 = last_y + ( last_y - last_quad_y );
-				last_quad_x = x1;
-				last_quad_y = y1;
+				v1 = vec_add( last, vec_sub( last, last_quad ) );
+				last_quad = v1;
 				if ( *svg_cmd == 't' ) 
 				{
-					x1 += last_x;
-					y1 += last_y;
-					x += last_x;
-					y += last_y;
+					v1 = vec_add( v1, last );
+					v = vec_add( v, last );
 				}
-				emit( "%g %g %g %g %g %g ",
-					1./3 * last_x + 2./3 * x1,
-					1./3 * last_y + 2./3 * y1,
-					2./3 * x1 + 1./3 * x,
-					2./3 * y1 + 1./3 * y,
-					x, y ),
-				last_cubic_x = last_x = x;
-				last_cubic_y = last_y = y;
+				emitf( ctx, "b %v %v %v ",
+					vec_add( vec_scal( last, 1./3 ), vec_scal( v1, 2./3 ) ),
+					vec_add( vec_scal( v1, 2./3 ), vec_scal( v, 1./3 ) ),
+					v ),
+				last_cubic = last = v;
 				s += n;
 			} 
-			while ( sscanf(s, "%f%f %n", &x, &y, &n ) == 2 );
+			while ( sscanf(s, "%lf%lf %n", &v.x, &v.y, &n ) == 2 );
 		}
 		/* elliptical arc (A, a) (7 arguments) */
-		else if ( sscanf( s, " %1[Aa]%f%f%f%f%f%f%f %n", svg_cmd,
-				&rx, &ry, &rot, &larc, &swp, &x, &y, &n ) == 8 ) 
+		else if ( sscanf( s, " %1[Aa]%lf%lf%lf%d%d%lf%lf %n", svg_cmd,
+				&r.x, &r.y, &rot, &larc, &swp, &v.x, &v.y, &n ) == 8 ) 
 		{
-			IPRINT( "path arc not implemented!\n" );
+			IPRINT( "arc\n" );
 			do 
 			{
-				// TODO: is there a sane way to do arcs with B-curves?
-				emit( "l " );
 				if ( *svg_cmd == 'a' ) 
-				{
-					x += last_x;
-					y += last_y;
-				}
-				emit( "%g %g ", x, y );
-				last_cubic_x = last_quad_x = last_x = x;
-				last_cubic_y = last_quad_y = last_y = y;
+					vec_add( v, last );
+				ass_arc( ctx, last, r, rot, larc, swp, v );
+				last_cubic = last_quad = last = v;
 				s += n;
 			} 
-			while ( sscanf(s, "%f%f%f%f%f%f%f %n", &rx, &ry, 
-						&rot, &larc, &swp,	&x, &y, &n ) == 7 );
+			while ( sscanf(s, "%lf%lf%lf%d%d%lf%lf %n", &r.x, &r.y, 
+						&rot, &larc, &swp, &v.x, &v.y, &n ) == 7 );
 		}
 		/* invalid path syntax */
 		else {
@@ -451,12 +583,13 @@ static int parsePath( SVGContext *ctx, const char *pd )
 	return res;
 }
 
-
-int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
+/*
+ * Callback function for XML parser
+ */
+static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 {
-	SVGContext *ctx = usr;
-	double x0, y0, x1, y1, x2, y2, x3, y3;
-	double cx, cy, rx, ry;
+	ctx_t *ctx = usr;
+	vec_t v1, v2, c, r;
 
 	if ( NXML_TYPE_PARENT != node->type 
 		&& NXML_TYPE_SELF != node->type 
@@ -466,14 +599,18 @@ int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 	switch ( evt ) 
 	{
 	case NXML_EVT_OPEN:
-		if ( 0 == strcasecmp( node->name, "svg" ) ) 
+		if ( 0 == strcasecmp( node->name, "svg" ) )
+		{
+			if ( ctx->in_svg )
+				IPRINT( "Warning: nested <svg>!\n" );
 			ctx->in_svg = 1;
+		}
 		if ( !ctx->in_svg ) 
 			break;
 		IPRINT( "%s {\n", node->name );
 		ctx_push( ctx );
-		// handle generic attributes (style, transform, ...)
-		parseGenAttr( ctx, node );
+		parseStyles( ctx, getStringAttr( node, "style" ) );
+		parseTransform( ctx, getStringAttr( node, "transform" ) );
 
 		if ( 0 == strcasecmp( node->name, "g" ) )
 		{
@@ -482,65 +619,38 @@ int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 		else if ( 0 == strcasecmp( node->name,  "line" ) )
 		{
 			pmode( 1 );
-			x1 = ctx->x + getNumericAttr( node, "x1" );
-			y1 = ctx->y + getNumericAttr( node, "y1" );
-			x2 = ctx->x + getNumericAttr( node, "x2" );
-			y2 = ctx->y + getNumericAttr( node, "y2" );
-			emit( "m %g %g l %g %g ", x1, y1, x2, y2 );
+			v1.x = ctx->o.x + getNumericAttr( node, "x1" );
+			v1.y = ctx->o.y + getNumericAttr( node, "y1" );
+			v2.x = ctx->o.x + getNumericAttr( node, "x2" );
+			v2.y = ctx->o.y + getNumericAttr( node, "y2" );
+			emitf( ctx, "m %v l %v ", v1, v2 );
 		}
 		else if ( 0 == strcasecmp( node->name, "rect" ) )
 		{
 			pmode( 1 );
-			x1 = ctx->x + getNumericAttr( node, "x" );
-			y1 = ctx->y + getNumericAttr( node, "y" );
-			x2 = x1 + getNumericAttr( node, "width" );
-			y2 = y1 + getNumericAttr( node, "height" );
+			v1.x = ctx->o.x + getNumericAttr( node, "x" );
+			v1.y = ctx->o.y + getNumericAttr( node, "y" );
+			v2.x = v1.x + getNumericAttr( node, "width" );
+			v2.y = v1.y + getNumericAttr( node, "height" );
 			// TODO: evaluate rx,ry and emulate rounded rect using Bézier curves
-			emit( "m %g %g l %g %g %g %g %g %g ", x1, y1, x2, y1, x2, y2, x1, y2 );
+			emitf( ctx, "m %v l %v %v %v", v1, (vec_t){v2.x,v1.y}, v2, (vec_t){v1.x,v2.y} );
 		}
-		else if ( 0 == strcasecmp( node->name, "ellipse" )
-			   || 0 == strcasecmp( node->name, "circle" ) )
+		else if ( 0 == strcasecmp( node->name, "circle" ) )
 		{
 			pmode( 1 );
-			cx = ctx->x + getNumericAttr( node, "cx" );
-			cy = ctx->y + getNumericAttr( node, "cy" );
-			if ( 0 == strcasecmp( node->name, "ellipse" ) )
-			{
-				rx = getNumericAttr( node, "rx" );
-				ry = getNumericAttr( node, "ry" );
-			}
-			else
-				rx = ry = getNumericAttr( node, "r" );
-			/*
-			Approximate a circle using four Bézier curves:
-			P_0 = (0,1),  P_1 = (c,1),   P_2 = (1,c),   P_3 = (1,0)
-			P_0 = (1,0),  P_1 = (1,-c),  P_2 = (c,-1),  P_3 = (0,-1)
-			P_0 = (0,-1), P_1 = (-c,-1), P_2 = (-1,-c), P_3 = (-1,0)
-			P_0 = (-1,0), P_1 = (-1,c),  P_2 = (-c,1),  P_3 = (0,1)
-			with c = 0.551915024494
-			[ http://spencermortensen.com/articles/bezier-circle/ ]
-			*/
-			#define BEZIER_CIRC 	0.551915024494
-			double crx = rx * BEZIER_CIRC;
-			double cry = ry * BEZIER_CIRC;
-			x0 = cx;		y0 = cy + ry;
-			emit( "m %g %g ", x0, y0 );
-			x1 = cx + crx;	y1 = cy + ry;
-			x2 = cx + rx;	y2 = cy + cry;
-			x3 = cx + rx;	y3 = cy;
-			emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
-			x1 = cx + rx;	y1 = cy - cry;
-			x2 = cx + crx;	y2 = cy - ry;
-			x3 = cx;		y3 = cy - ry;
-			emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
-			x1 = cx - crx;	y1 = cy - ry;
-			x2 = cx - rx;	y2 = cy - cry;
-			x3 = cx - rx;	y3 = cy;
-			emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
-			x1 = cx - rx;	y1 = cy + cry;
-			x2 = cx - crx;	y2 = cy + ry;
-			x3 = cx;		y3 = cy + ry;
-			emit( "b %g %g %g %g %g %g ", x1, y1, x2, y2, x3, y3 );
+			c.x = ctx->o.x + getNumericAttr( node, "cx" );
+			c.y = ctx->o.y + getNumericAttr( node, "cy" );
+			r.x = r.y = getNumericAttr( node, "r" );
+			ass_ellipse( ctx, c, r );
+		}
+		else if ( 0 == strcasecmp( node->name, "ellipse" ) )
+		{
+			pmode( 1 );
+			c.x = ctx->o.x + getNumericAttr( node, "cx" );
+			c.y = ctx->o.y + getNumericAttr( node, "cy" );
+			r.x = getNumericAttr( node, "rx" );
+			r.y = getNumericAttr( node, "ry" );
+			ass_ellipse( ctx, c, r );
 		}
 		else if ( 0 == strcasecmp( node->name, "path" ) )
 		{
@@ -549,7 +659,7 @@ int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 		}
 		else 
 		{
-			/* (yet) unhandled tags:
+			/* (yet) unhandled relevant tags:
 			 * polyline, polygon: easily converted to SVG paths!
 			 * text: Forget it, why would you want to export SVG 
 			 *       text to ASS?!? (or simply convert to path)
@@ -559,8 +669,12 @@ int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 		break;
 
 	case NXML_EVT_CLOSE:
-		if ( !strcasecmp( node->name, "svg" ) ) 
+		if ( 0 == strcasecmp( node->name, "svg" ) )
+		{
+			if ( !ctx->in_svg )
+				IPRINT( "Warning: excess </svg>!\n" );
 			ctx->in_svg = 0;
+		}
 		ctx_pop( ctx );
 		if ( !ctx->in_svg ) 
 			break;
@@ -570,11 +684,15 @@ int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 	default:
 		break;
 	}
-	if ( 1 == config.assfup )
+	if ( 1 == config.ass_fup )
 		pmode( 0 );
 	return 0;
 }
 
+
+/************************************************************
+ *	XML parser bindung stuff
+ */
 static int getFile( char **pbuf, size_t *psz, size_t inc, FILE *pf )
 {
 	size_t x = 0, n;
@@ -602,11 +720,12 @@ static int getFile( char **pbuf, size_t *psz, size_t inc, FILE *pf )
 	return ferror( pf );
 }
 
-static int parse( FILE *fp, SVGContext *ctx ) 
+static int parse( FILE *fp ) 
 {
 	int res;
 	char *buf = NULL;
 	size_t sz = 0;
+	ctx_t ctx;
 	
 	if ( 0 != getFile( &buf, &sz, 4000, fp ) )
 	{
@@ -614,16 +733,23 @@ static int parse( FILE *fp, SVGContext *ctx )
 		free( buf );
 		return -1;
 	}
-	memset( ctx, 0, sizeof *ctx );
-	res = nxmlParse( buf, svg2ass, ctx );
+	memset( &ctx, 0, sizeof ctx );
+	// initialize origin and matrix:
+	ctx.o = VEC_ZERO;
+	ctx.m = MTX_UNI;
+	res = nxmlParse( buf, svg2ass, &ctx );
 	pmode( 0 );
 	emit( "\n" );
-	while ( 0 == ctx_pop( ctx ) )
-		;
+	while ( 0 == ctx_pop( &ctx ) )
+		;	// in case we read an incomplete document
 	free( buf );
 	return res;
 }
 
+
+/************************************************************
+ *	Main program stuff
+ */
 static int usage( char* progname )
 {
 	char *p;
@@ -631,33 +757,40 @@ static int usage( char* progname )
 		progname = ++p;
 	fprintf( stderr, "Usage: %s [options] [svg_file ...]\n", progname );
 	fprintf( stderr,
-		" If no file is specified input is taken from stdin.\n"
+		" SVG to ASS converter\n"
+		" If no file is specified, or filename equals '-', input is taken from stdin.\n"
 		" Options:\n"
-		"  -a ASS-fuckup mode: 0 = preserve layout (default), 1 = preserve colors\n"
+		"  -a ASS-fuckup mode: 0 = preserve layout (default), 1 = preserve colors.\n"
+		"  -f ASS floating point number prescision; default: 1\n"
+		"  -h Print usage message and exit.\n"
+		"  -o Write output to file; default: stdout.\n"
 	);
 	return 0;
 }
 
 int main( int argc, char** argv )
 {
-	SVGContext ctx;
 	int nfiles = 0;
 	int opt;
-	const char *ostr = "-:a:h";
-	FILE *fp;
+	const char *ostr = "-:a:f:ho:";
+	FILE *ifp;
+	
+	config.of = stdout;
 
 	while ( -1 != ( opt = getopt( argc, argv, ostr ) ) )
 	{
 		switch ( opt )
 		{
 		case 1:
-			DPRINT( "parsing file '%s' ...\n", optarg );
-			if ( NULL == ( fp = fopen( optarg, "r" ) ) )
+			DPRINT( "reading from file '%s'\n", optarg );
+			if ( 0 == strcmp( "-", optarg ) )
+				ifp = stdin;
+			else if ( NULL == ( ifp = fopen( optarg, "r" ) ) )
 			{
 				fprintf( stderr, "fopen '%s': %s\n", optarg, strerror( errno ) );		
 				goto ERR0;
 			}
-			if ( 0 != parse( fp, &ctx ) )
+			if ( 0 != parse( ifp ) )
 			{
 				fprintf( stderr, "Error processing file '%s'\n", optarg );
 				goto ERR0;
@@ -665,7 +798,18 @@ int main( int argc, char** argv )
 			++nfiles;
 			break;
 		case 'a':
-			config.assfup = atoi( optarg );
+			config.ass_fup = atoi( optarg );
+			break;
+		case 'f':
+			config.ass_fprec = atoi( optarg );
+			break;
+		case 'o':
+			DPRINT( "writing to file '%s'\n", optarg );
+			if ( NULL == ( config.of = fopen( optarg, "w" ) ) )
+			{
+				fprintf( stderr, "fopen '%s': %s\n", optarg, strerror( errno ) );		
+				goto ERR0;
+			}
 			break;
 		case 'h':
 			usage( argv[0] );
@@ -688,13 +832,15 @@ int main( int argc, char** argv )
 	
 	if ( !nfiles )
 	{
-		DPRINT( "parsing stdin ...\n" );
-		if ( 0 != parse( stdin, &ctx ) )
+		DPRINT( "reading from <stdin>\n" );
+		if ( 0 != parse( stdin ) )
 		{
-			fprintf( stderr, "Error processing stdin'\n" );
+			fprintf( stderr, "Error processing <stdin>\n" );
 			goto ERR0;
 		}
+		++nfiles;
 	}
+	DPRINT( "%d file%s processed\n", nfiles, nfiles == 1 ? "" : "s" );
 	exit( EXIT_SUCCESS );
 }
 
