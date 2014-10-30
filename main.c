@@ -6,8 +6,6 @@
  * 
  * TODOs:
  *  - Actually test the more esoteric curveto path commands
- *  - Parse transformation, apply to context (at least translate;
- *      ... matrices? Bruahahaha!
  *  - Find a way to emulate arcs with Bezier curves? Oh my!
  *  - Clippath? ?? ???
  *  - rounded rects? (c'mon, object-to-path is your friend!)
@@ -26,6 +24,8 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <float.h>
+#include <math.h>
 
 #include <unistd.h>
 
@@ -54,11 +54,13 @@
  *	Config stuff
  */
  
- static struct {
+#define MAX_FPREC	5
+
+static struct {
 	int ass_fup;
 	int ass_fprec;
 	FILE *of;
- } config = {
+} config = {
 	0,
 	1,
 	NULL,
@@ -107,8 +109,6 @@ static int ctx_pop( ctx_t *ctx )
  *	ASS output generator
  */
 
-#define ASS_FPREC	3
-
 #if 0
 int emit( const char *fmt, ... )
 {
@@ -124,12 +124,15 @@ int emit( const char *fmt, ... )
 #define emit(...)	(0>fprintf(config.of,__VA_ARGS__)?-1:0)
 #endif
 
-static inline const char *ftoa( double d )
+/*
+ *	Format floating point number with a given precision,
+ *	stripping trailing zero fractional component.
+ */
+static inline char *ftoa( char *buf, int prec, double d )
 {
-	static char buf[50];
 	char *b;
 
-	sprintf( buf, "%0.*f", config.ass_fprec, d );
+	sprintf( buf, "%0.*f", prec, d );
 	if ( strchr( buf, '.' ) )
 	{
 		b = buf + strlen( buf ) - 1;
@@ -145,8 +148,9 @@ int emitf( ctx_t *ctx, const char *fmt, ... )
 {
 	int r = 0;
 	const char *p;
-	va_list arglist;
 	vec_t v;
+	va_list arglist;
+	static char buf[3 + DBL_MANT_DIG - DBL_MIN_EXP + 1];
 	
 	va_start( arglist, fmt );
 	for ( p = fmt; *p && 0 == r; ++p )
@@ -156,14 +160,14 @@ int emitf( ctx_t *ctx, const char *fmt, ... )
 			++p;
 			switch( tolower( *p ) )
 			{
-			case 'e': case 'f': case 'g':
-				r = emit( "%s", ftoa( va_arg( arglist, double ) ) );
+			case 'f':
+				r = emit( "%s", ftoa( buf, config.ass_fprec, va_arg( arglist, double ) ) );
 				break;
 			case 'v': 
 				v = va_arg( arglist, vec_t );
 				v = mtx_vmul( ctx->m, v );
-				r = emit( "%s ", ftoa( v.x ) );
-				r = emit( "%s", ftoa( v.y ) );
+				r = emit( "%s ", ftoa( buf, config.ass_fprec, v.x ) );
+				r = emit( "%s",  ftoa( buf, config.ass_fprec, v.y ) );
 				break;
 			case '%':
 				r = emit( "%%" );
@@ -237,9 +241,9 @@ static int parseStyles( ctx_t *ctx, const char *style )
 	if ( !s || !*s )
 		return 0;
 	IPRINT( "style\n" );
-	while ( sscanf( s, "%99[^:]:%99[^;];%n", name, value, &n ) == 2 )
+	while ( sscanf( s, " %99[^ :] : %99[^ ;] ;%n", name, value, &n ) == 2 )
 	{   
-		//IPRINT( "%s=%s\n", name, value );
+		IPRINT( "    %s=%s\n", name, value );
 		if ( 0 == strcasecmp( name, "fill" ) && 0 != strcasecmp( value, "none" ) )
 		{
 			nocol &= ~1;
@@ -269,52 +273,112 @@ static int parseStyles( ctx_t *ctx, const char *style )
 	emit( "\\1a&H%02X&", fill_a );
 	emit( "\\3c&H%06X&", stroke_col );
 	emit( "\\3a&H%02X&", stroke_a );
-	emitf( ctx, "\\bord%g", stroke_wid );
+	emitf( ctx, "\\bord%f", stroke_wid );
 	emit( "}" );
 	return 0;
 }
 
-static int parseTransform( ctx_t *ctx, const char *trans )
+
+#ifndef M_PI 
+	#define M_PI 3.14159265358979323846
+#endif
+#define DEG2RAD(D)	((double)(D)/180.0*M_PI)
+
+static int parseTransform( ctx_t *ctx, const char *trf )
 {
-	int n;
-	const char *s;
+	int a = 0, n;
+	const char *s = trf;
+	char op[100];
+	double phi;
 	mtx_t m;
 	
-	if ( !trans || !*trans )
+	if ( !s || !*s )
 		return 0;
-	
-	IPRINT( "transform\n" );
-	m = MTX_UNI;
-	if ( NULL != ( s = strstr( trans, "scale" ) ) )
+	IPRINT( "transform\n" );	
+	while ( *s )
 	{
-		n = sscanf( s + 5, " (%lf ,%lf )", &m.a, &m.d );
-		if ( 0 < n )
+		if ( sscanf( s, " %99[^ (]%n", op, &n ) != 1 || !*op )
+			break;
+		s += n;
+		m = MTX_UNI;
+		if ( 0 == strcasecmp( op, "translate" ) )
 		{
-			if ( 1 == n )
+			a = sscanf( s, " (%lf%n", &m.e, &n );
+			if ( 1 == a )
+			{
+				s += n;
+				if ( 1 == sscanf( s, " ,%lf%n", &m.f, &n ) )
+					s += n;
+			}
+		}
+		else if ( 0 == strcasecmp( op, "scale" ) )
+		{
+			a = sscanf( s, " (%lf%n", &m.a, &n );
+			if ( 1 == a )
+			{
+				s += n;
 				m.d = m.a;
-			ctx->m = m;//mtx_mmul( m, ctx->m );
+				if ( 1 == sscanf( s, " ,%lf%n", &m.d, &n ) )
+					s += n;
+			}
 		}
-		m = MTX_UNI;
-	}
-	if ( NULL != ( s = strstr( trans, "translate" ) ) )
-	{
-		n = sscanf( s + 9, " (%lf ,%lf )", &m.e, &m.f );
-		if ( 0 < n )
-		{	
-			m.a = m.d = 1.;
-			ctx->m = m;//mtx_mmul( m, ctx->m );
+		else if ( 0 == strcasecmp( op, "rotate" ) )
+		{
+			mtx_t r = MTX_UNI;
+			a = sscanf( s, " (%lf%n", &phi, &n );
+			if ( 1 == a )
+			{
+				s += n;
+				phi = DEG2RAD(phi);
+				r.a = r.d = cos( phi );
+				r.b = sin( phi );
+				r.c = -r.b;
+				if ( 2 == sscanf( s, " ,%lf ,%lf%n", &m.e, &m.f, &n ) )
+				{
+					s += n;
+					ctx->m = mtx_mmul( ctx->m, m );
+					ctx->m = mtx_mmul( ctx->m, r );
+					m.e = -m.e;
+					m.f = -m.f;
+				}
+				else
+					m = r;
+			}
 		}
-		m = MTX_UNI;
-	}
-	if ( NULL != ( s = strstr( trans, "matrix" ) ) )
-	{
-		n = sscanf( s + 6, " (%lf ,%lf ,%lf ,%lf ,%lf ,%lf )", 
-				&m.a, &m.b, &m.c, &m.d, &m.e, &m.f );
-		if ( 6 == n )
-		{	
-			ctx->m = m;//mtx_mmul( m, ctx->m );
+		else if ( 0 == strcasecmp( op, "skewX" ) )
+		{
+			a = sscanf( s, " (%lf%n", &phi, &n );
+			if ( 1 == a )
+			{
+				s += n;
+				m.c = tan( DEG2RAD(phi) );
+			}
 		}
-		m = MTX_UNI;
+		else if ( 0 == strcasecmp( op, "skewY" ) )
+		{
+			a = sscanf( s, " (%lf%n", &phi, &n );
+			if ( 1 == a )
+			{
+				s += n;
+				m.b = tan( DEG2RAD(phi) );
+			}
+		}
+		else if ( 0 == strcasecmp( op, "matrix" ) )
+		{
+			a = sscanf( s, " (%lf ,%lf ,%lf ,%lf ,%lf ,%lf%n", 
+								&m.a, &m.b, &m.c, &m.d, &m.e, &m.f, &n );
+			if ( 6 == a )
+				s += n;
+		}
+		if ( 0 < a )
+		{
+			ctx->m = mtx_mmul( ctx->m, m );
+			IPRINT( "    %s(%g,%g,%g,%g,%g,%g) --> CTM(%g,%g,%g,%g,%g,%g)\n", 
+					op, m.a, m.b, m.c, m.d, m.e, m.f, 
+					ctx->m.a, ctx->m.b, ctx->m.c, ctx->m.d, ctx->m.e, ctx->m.f );
+		}
+		sscanf( s, "%*[ 0-9.)]%n", &n );
+		s += n;
 	}
 	return 0;
 }
@@ -602,7 +666,9 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 		if ( 0 == strcasecmp( node->name, "svg" ) )
 		{
 			if ( ctx->in_svg )
+			{
 				IPRINT( "Warning: nested <svg>!\n" );
+			}
 			ctx->in_svg = 1;
 		}
 		if ( !ctx->in_svg ) 
@@ -623,6 +689,7 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 			v1.y = ctx->o.y + getNumericAttr( node, "y1" );
 			v2.x = ctx->o.x + getNumericAttr( node, "x2" );
 			v2.y = ctx->o.y + getNumericAttr( node, "y2" );
+			IPRINT( "x1=%g, y1=%g, x2=%g, y2=%g\n", v1.x, v1.y, v2.x, v2.y );
 			emitf( ctx, "m %v l %v ", v1, v2 );
 		}
 		else if ( 0 == strcasecmp( node->name, "rect" ) )
@@ -633,6 +700,7 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 			v2.x = v1.x + getNumericAttr( node, "width" );
 			v2.y = v1.y + getNumericAttr( node, "height" );
 			// TODO: evaluate rx,ry and emulate rounded rect using Bézier curves
+			IPRINT( "x=%g, y=%g, w=%g, h=%g\n", v1.x, v1.y, v2.x-v1.x, v2.y-v1.y );
 			emitf( ctx, "m %v l %v %v %v", v1, (vec_t){v2.x,v1.y}, v2, (vec_t){v1.x,v2.y} );
 		}
 		else if ( 0 == strcasecmp( node->name, "circle" ) )
@@ -641,6 +709,7 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 			c.x = ctx->o.x + getNumericAttr( node, "cx" );
 			c.y = ctx->o.y + getNumericAttr( node, "cy" );
 			r.x = r.y = getNumericAttr( node, "r" );
+			IPRINT( "x=%g, y=%g, r=%g\n", c.x, c.y, r.x );
 			ass_ellipse( ctx, c, r );
 		}
 		else if ( 0 == strcasecmp( node->name, "ellipse" ) )
@@ -650,6 +719,7 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 			c.y = ctx->o.y + getNumericAttr( node, "cy" );
 			r.x = getNumericAttr( node, "rx" );
 			r.y = getNumericAttr( node, "ry" );
+			IPRINT( "x=%g, y=%g, rx=%g, ry=%g\n", c.x, c.y, r.x, r.y );
 			ass_ellipse( ctx, c, r );
 		}
 		else if ( 0 == strcasecmp( node->name, "path" ) )
@@ -672,7 +742,9 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 		if ( 0 == strcasecmp( node->name, "svg" ) )
 		{
 			if ( !ctx->in_svg )
+			{
 				IPRINT( "Warning: excess </svg>!\n" );
+			}
 			ctx->in_svg = 0;
 		}
 		ctx_pop( ctx );
@@ -761,7 +833,8 @@ static int usage( char* progname )
 		" If no file is specified, or filename equals '-', input is taken from stdin.\n"
 		" Options:\n"
 		"  -a ASS-fuckup mode: 0 = preserve layout (default), 1 = preserve colors.\n"
-		"  -f ASS floating point number prescision; default: 1\n"
+		"  -f ASS floating point number prescision, 0-%d; default: 1\n", MAX_FPREC );
+	fprintf( stderr,
 		"  -h Print usage message and exit.\n"
 		"  -o Write output to file; default: stdout.\n"
 	);
@@ -802,6 +875,11 @@ int main( int argc, char** argv )
 			break;
 		case 'f':
 			config.ass_fprec = atoi( optarg );
+			if ( 0 > config.ass_fprec || MAX_FPREC < config.ass_fprec )
+			{
+				fprintf( stderr, "Floating point precision %d out of range\n", config.ass_fprec );		
+				goto ERR1;
+			}
 			break;
 		case 'o':
 			DPRINT( "writing to file '%s'\n", optarg );

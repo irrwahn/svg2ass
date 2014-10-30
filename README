@@ -1,8 +1,8 @@
 
-SVG2ASS - World's Lousiest SVG to ASS converter
+SVG2ASS - World's Lousiest SVG To ASS Converter
 
 
-HUH, SVG MY ASS?!?
+SVG MY ASS?!?
 
 SVG2ASS feeds on SVG files and drops ASS snippets, ready to make your 
 eyes bleed when pasted in e.g. Aegisub. Only a selection of actually 
@@ -14,37 +14,33 @@ The SVG is not validated at all, thus you might get away with feeding
 SVG2ASS some Shakespeare play and get some fancy shapes from it.
 
 Supported elements:
-  * line (Yay!)
-  * rect (WooOOOoot!)
-  * circle, ellipse (despite ASS having no ellipse primitive; 
-    now go read the code and cower in fear!)
-  * path, except arcs - which is indeed a severe shortcoming, even 
-    more so, as e.g. Inkscape uses arc paths instead of "real" 
-    ellipses.
+  * line
+  * rect
+  * circle, ellipse
+  * path (except elliptical arcs!)
 
 Supported attributes:
-  * essential attributes WRT the elements listed above
+  * attributes essential to the elements listed above
   * styles: colors/alpha for fill and stroke; stroke width
-  * transform: not (yet)
+  * transformations (translate, scale, rotate, skewX, skewY, matrix)
 
-That's pretty much it. Not half bad, you think? Well, here's the catch:
+That's pretty much it, and here's a catch:
  
 Advanced SubStation Alpha drawing command syntax is a fine example of 
 how to miss a fly with a bowling ball at point-blank range. One result 
-of this madness is (now buckle your belt, Dorothy, 'cause Kansas is 
-going bye-bye) that you can choose, if you'd rather have  
+of this madness is that you can choose between having
   a) your shape coordinates (layout) messed up, or 
   b) only the last color definiton applied to all the shapes in a line. 
 SVG2ASS provides a command line switch to let you choose your favorite 
 variety of fuck-up. To get both working correctly you'd have to go 
-with a) and spread the drawing sequences over sepearte lines.
+with a) and spread the drawing sequences over separate lines.
 
 
 BUILD IT!
 
 Just slab it together using compiler and linker, see Makefile. Nothing 
 fancy there, save that one peculiarity: define _POSIX_C_SOURCE=200809L 
-to make getopt and strdup happy.
+to make for happy getopt and strdup.
 
 
 LEGALESE

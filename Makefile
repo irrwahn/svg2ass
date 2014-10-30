@@ -7,7 +7,7 @@ INCS    =
 CFLAGS  = $(INCS) -W -Wall -std=c99 -D_POSIX_C_SOURCE=200809L
 LD      = gcc
 LIBS    =
-LDFLAGS = $(LIBS)
+LDFLAGS = -lm $(LIBS)
 RM      = rm -f
 STRIP	= strip -s
 

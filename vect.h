@@ -1,4 +1,5 @@
 /*
+ *	Project: svg2ass	
  *    File: vect.h
  * Created: 2014-10-27
  *  Author: uw
@@ -18,13 +19,15 @@ typedef struct {
 } vec_t;
 
 typedef struct {
-	double a, c, e;
+	// order matches SVG transform matrix!
+	double a, c, e;	
 	double b, d, f;
-	   // 0, 0, 1;
+	//     0  0  1	implied!
 } mtx_t;
 
 
 #define VEC_ZERO	((vec_t){ 0, 0 })
+#define MTX_ZERO	((mtx_t){ 0, 0, 0,  0, 0, 0 })
 #define MTX_ZERO	((mtx_t){ 0, 0, 0,  0, 0, 0 })
 #define MTX_UNI		((mtx_t){ 1, 0, 0,  0, 1, 0 })
 
