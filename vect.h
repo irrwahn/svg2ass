@@ -28,7 +28,6 @@ typedef struct {
 
 #define VEC_ZERO	((vec_t){ 0, 0 })
 #define MTX_ZERO	((mtx_t){ 0, 0, 0,  0, 0, 0 })
-#define MTX_ZERO	((mtx_t){ 0, 0, 0,  0, 0, 0 })
 #define MTX_UNI		((mtx_t){ 1, 0, 0,  0, 1, 0 })
 
 
@@ -38,6 +37,7 @@ vec_t vec_scal( vec_t a, double f );
 
 vec_t mtx_vmul( mtx_t m, vec_t v );
 mtx_t mtx_mmul( mtx_t m, mtx_t n );
+
 
 #ifdef __cplusplus
 	}

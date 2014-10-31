@@ -4,14 +4,13 @@ SVG2ASS - World's Lousiest SVG To ASS Converter
 
 SVG MY ASS?!?
 
-SVG2ASS feeds on SVG files and drops ASS snippets, ready to make your 
-eyes bleed when pasted in e.g. Aegisub. Only a selection of actually 
-useful basic SVG features is supported, whereas most of the more 
-"advanced" (read: crammed in) SVG crap is simply ignored. You can work 
-around some of the limitations by converting everything (even the 
-kitchen sink) to paths and flattening your SVG as much as feasible.
-The SVG is not validated at all, thus you might get away with feeding 
-SVG2ASS some Shakespeare play and get some fancy shapes from it.
+SVG2ASS feeds on SVG files and drops ASS dialog lines, ready for 
+pasting in e.g. Aegisub. Only a basic set of SVG funtionality is 
+supported, whereas most of the more advanced features are simply 
+ignored. You can work around some of these limitations by converting 
+all objects to paths and flattening your SVG as much as feasible.
+The SVG is not validated at all, thus you might get away with 
+converting some Shakespeare play and get some fancy shapes from it.
 
 Supported elements:
   * line
@@ -24,23 +23,26 @@ Supported attributes:
   * styles: colors/alpha for fill and stroke; stroke width
   * transformations (translate, scale, rotate, skewX, skewY, matrix)
 
-That's pretty much it, and here's a catch:
- 
-Advanced SubStation Alpha drawing command syntax is a fine example of 
-how to miss a fly with a bowling ball at point-blank range. One result 
-of this madness is that you can choose between having
-  a) your shape coordinates (layout) messed up, or 
-  b) only the last color definiton applied to all the shapes in a line. 
-SVG2ASS provides a command line switch to let you choose your favorite 
-variety of fuck-up. To get both working correctly you'd have to go 
-with a) and spread the drawing sequences over separate lines.
 
-
-BUILD IT!
+BUILD IT
 
 Just slab it together using compiler and linker, see Makefile. Nothing 
 fancy there, save that one peculiarity: define _POSIX_C_SOURCE=200809L 
-to make for happy getopt and strdup.
+to make for happy getopt and strdup. If your environment lacks standard 
+UNIX tools (sh, tempfile, grep, head, ...) you have to manually provide 
+a version.h containing something similar to this:
+  #define VERSION "0.1.0"
+  #define SVNVER "289"
+
+
+RUN IT
+
+Execute svg2ass -h to obtain a short help text about program usage.
+Among other general and ASS related, fairly self explaining command 
+line options, SVG2ASS provides an option to render all shapes into a 
+single drawing command per SVG file (which makes all shapes use the 
+same initial color and border width settings), or to produce a 
+seperate dialog line for each shape (which is the default). 
 
 
 LEGALESE

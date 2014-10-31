@@ -8,24 +8,32 @@ CFLAGS  = $(INCS) -W -Wall -std=c99 -D_POSIX_C_SOURCE=200809L
 LD      = gcc
 LIBS    =
 LDFLAGS = -lm $(LIBS)
+CP		= cp
 RM      = rm -f
+SH		= sh
 STRIP	= strip -s
+VERGEN	= $(SH) version.sh
 
 PRJ     = svg2ass
 SRC     = $(wildcard *.c)
 OBJ     = $(SRC:%.c=%.o)
 BIN     = $(PRJ)
 DEP     = $(PRJ).dep
+VER		= version.h 
 
-.PHONY: all debug clean dep
+.PHONY: all debug clean gen dep
 
 all: CFLAGS += -O2 -DNDEBUG
-all: dep $(BIN)
+all: gen dep $(BIN)
 	$(STRIP) $(BIN)
 
 debug: CFLAGS += -O0 -DDEBUG -g3
-debug: dep $(BIN)
+debug: gen dep $(BIN)
 
+gen: 
+	-$(CP) version.in $(VER) 2> /dev/null
+	-$(VERGEN) $(VER) $(MAKECMDGOALS) 2> /dev/null
+	
 dep:
 	$(CC) -MM $(SRC) > $(DEP)
 
@@ -38,7 +46,7 @@ $(BIN): $(OBJ)
 	$(CC) -c $< -o $@ $(CFLAGS)
 
 clean:
-	${RM} $(OBJ) $(BIN) $(PRJ).dep 2> /dev/null
+	-${RM} $(OBJ) $(BIN) $(PRJ).dep $(VER) 2> /dev/null
 
 
 ###########
