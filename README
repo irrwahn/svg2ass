@@ -1,8 +1,8 @@
 
-SVG2ASS - World's Lousiest SVG To ASS Converter
+SVG2ASS - SVG To ASS Converter
+==============================
 
-
-SVG MY ASS?!?
+OVERVIEW
 
 SVG2ASS feeds on SVG files and drops ASS dialog lines, ready for 
 pasting in e.g. Aegisub. Only a basic set of SVG funtionality is 
@@ -14,54 +14,41 @@ converting some Shakespeare play and get some fancy shapes from it.
 
 Supported elements:
   * line
-  * rect
+  * rect (square and rounded corners)
   * circle, ellipse
   * path (except elliptical arcs!)
 
 Supported attributes:
   * attributes essential to the elements listed above
-  * styles: colors/alpha for fill and stroke; stroke width
-  * transformations (translate, scale, rotate, skewX, skewY, matrix)
+  * selected styles: colors/alpha for fill and stroke; stroke width
+  * transform (translate, scale, rotate, skewX, skewY, matrix)
+
+The generated ASS dialog lines follow this format description:
+Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 
 
 BUILD IT
 
-Just slab it together using compiler and linker, see Makefile. Nothing 
-fancy there, save that one peculiarity: define _POSIX_C_SOURCE=200809L 
-to make for happy getopt and strdup. If your environment lacks standard 
-UNIX tools (sh, tempfile, grep, head, ...) you have to manually provide 
-a version.h containing something similar to this:
-  #define VERSION "0.1.0"
-  #define SVNVER "289"
+SVG2ASS should easily build on an average GNU/Linux or other POSIX 
+compliant system by just executing make.  On other systems just slab 
+it together using compiler and linker, see Makefile - nothing fancy 
+there. However, depending on your runtime environment, you might 
+have provide your own getopt, strdup or strcasecmp implementations. 
+Also, you might have to manually copy version.in to version.h
 
 
 RUN IT
 
 Execute svg2ass -h to obtain a short help text about program usage.
-Among other general and ASS related, fairly self explaining command 
+Among other general and ASS related fairly self explaining command 
 line options, SVG2ASS provides an option to render all shapes into a 
-single drawing command per SVG file (which makes all shapes use the 
-same initial color and border width settings), or to produce a 
-seperate dialog line for each shape (which is the default). 
+single drawing command per SVG file (which forces all shapes to use 
+teh same initial color and border width settings), or, alternatively,
+produce a seperate dialog line for each shape (which is the default). 
 
 
 LEGALESE
 
-Svg2ass is lincensed under the terms of the WTFPL license v2:
-
---8<------------------------------------------------------------------
-            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
-                    Version 2, December 2004
- 
- Copyright (C) 2004 Sam Hocevar
-  14 rue de Plaisance, 75014 Paris, France
- Everyone is permitted to copy and distribute verbatim or modified
- copies of this license document, and changing it is allowed as long
- as the name is changed.
- 
-            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
-   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
- 
-  0. You just DO WHAT THE FUCK YOU WANT TO.
------------------------------------------------------------------->8--
+Svg2ass is lincensed under the terms of the WTFPL license V2, see 
+LICENSE file.
 

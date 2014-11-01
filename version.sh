@@ -1,9 +1,10 @@
 #!/bin/sh
-VI='version.in'
-VF=$1
+VI=$1
+VF=$2
+TAG=$3
 TF=`tempfile`
 RV=`head -n1 version.in`
-SV=`svnversion | grep -E '^[0-9]+.*'`
+SV=`svnversion | grep -E '^[0-9]+[^\s]*' || echo 'Unknown'`
 echo "$RV" > "$VF"
-echo "#define SVNVER \"$SV $2\"" >> "$VF"
+echo "#define SVNVER \"$SV$TAG\"" >> "$VF"
 cat "$VF"

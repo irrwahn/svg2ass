@@ -19,20 +19,25 @@ SRC     = $(wildcard *.c)
 OBJ     = $(SRC:%.c=%.o)
 BIN     = $(PRJ)
 DEP     = $(PRJ).dep
-VER		= version.h 
+VER_IN	= version.in
+VER_H	= version.h 
 
-.PHONY: all debug clean gen dep
+.PHONY: all release debug clean gen dep
 
-all: CFLAGS += -O2 -DNDEBUG
-all: gen dep $(BIN)
+all: release
+
+release: CFLAGS += -O2 -DNDEBUG
+release: TAG = -rls
+release: gen dep $(BIN)
 	$(STRIP) $(BIN)
 
 debug: CFLAGS += -O0 -DDEBUG -g3
+debug: TAG = -dbg
 debug: gen dep $(BIN)
 
 gen: 
-	-$(CP) version.in $(VER) 2> /dev/null
-	-$(VERGEN) $(VER) $(MAKECMDGOALS) 2> /dev/null
+	-$(CP) $(VER_IN) $(VER_H) 2> /dev/null
+	-$(VERGEN) $(VER_IN) $(VER_H) $(TAG)
 	
 dep:
 	$(CC) -MM $(SRC) > $(DEP)
@@ -46,7 +51,7 @@ $(BIN): $(OBJ)
 	$(CC) -c $< -o $@ $(CFLAGS)
 
 clean:
-	-${RM} $(OBJ) $(BIN) $(PRJ).dep $(VER) 2> /dev/null
+	-${RM} $(OBJ) $(BIN) $(DEP) 2> /dev/null
 
 
 ###########
