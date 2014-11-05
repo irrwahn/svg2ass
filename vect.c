@@ -1,43 +1,64 @@
 /*
- *	Project: svg2ass	
+ * Naive 2-D graphics vector and matrix implementation.
+ * 
+ * Project: svg2ass	
  *    File: vect.c
  * Created: 2014-10-27
- *  Author: uw
-*/
+ *  Author: Urban Wallasch
+ */
+
+#include <math.h>
 
 #include "vect.h"
 
 
-vec_t vec_add( vec_t a, vec_t b )
+vec_t vec_add( vec_t u, vec_t v )
 {
-	vec_t r;
-	r.x = a.x + b.x;
-	r.y = a.y + b.y;
-	return r;
+	return VEC( u.x + v.x, u.y + v.y );
 }
 
-vec_t vec_sub( vec_t a, vec_t b )
+vec_t vec_sub( vec_t u, vec_t v )
 {
-	vec_t r;
-	r.x = a.x - b.x;
-	r.y = a.y - b.y;
-	return r;
+	return VEC( u.x - v.x, u.y - v.y );
 }
 
 vec_t vec_scal( vec_t v, double f )
 {
-	vec_t r;
-	r.x = v.x * f;
-	r.y = v.y * f;
-	return r;
+	return VEC( v.x * f, v.y * f );
 }
 
-vec_t mtx_vmul( mtx_t m, vec_t v )
+vec_t vec_mmul( mtx_t m, vec_t v )
 {
-	vec_t r;
-	r.x = m.a * v.x + m.c * v.y + m.e;
-	r.y = m.b * v.x + m.d * v.y + m.f;
-	return r;
+	return VEC ( m.a * v.x + m.c * v.y + m.e,
+				 m.b * v.x + m.d * v.y + m.f );
+}
+
+vec_t vec_norm( vec_t v, int dir )
+{
+	v = dir ? VEC( -v.y, v.x ) : VEC( v.y, -v.x );
+	return vec_scal( v, 1.0 / vec_abs( v ) );
+}
+
+double vec_abs( vec_t v )
+{
+	return sqrt( v.x * v.x + v.y * v.y );
+}
+
+double vec_dot( vec_t u, vec_t v )
+{
+	return u.x * v.x + u.y * v.y; 
+}
+
+double vec_ang( vec_t u, vec_t v )
+{
+	double sign = ( ( u.x * v.y - u.y * v.x ) < 0.0 ) ? -1.0 : 1.0;
+	double t = vec_dot( u, v ) / ( vec_abs( u ) * vec_abs( v ) );
+	return acos( t ) * sign;
+}
+
+int vec_eq( vec_t u, vec_t v, double e )
+{
+	return vec_abs( vec_sub( u, v ) ) <= fabs( e );
 }
 
 mtx_t mtx_mmul( mtx_t m, mtx_t n )

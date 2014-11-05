@@ -1,10 +1,16 @@
 #####################################
-##  Makefile for project: svg2ass  ##
-#####################################
+##
+##	Project: svg2ass
+## 	   File: Makefile
+##  Created: 2014-10-23
+##   Author: Urban Wallasch
+##
 
 CC      := gcc
 INCS    =
-CFLAGS  = $(INCS) -W -Wall -std=c99 -D_POSIX_C_SOURCE=200809L
+CFLAGS  = $(INCS) -Wall -Wextra -Wpedantic -std=c99
+# support POSIX strcasecmp, strdup and getopt:
+CFLAGSX = -D_POSIX_C_SOURCE=200809L
 LD      = gcc
 LIBS    =
 LDFLAGS = -lm $(LIBS)
@@ -36,7 +42,7 @@ debug: TAG = -dbg
 debug: gen dep $(BIN)
 
 gen: 
-	-$(CP) $(VER_IN) $(VER_H) 2> /dev/null
+	-@$(CP) $(VER_IN) $(VER_H) 2> /dev/null
 	-$(VERGEN) $(VER_IN) $(VER_H) $(TAG)
 	
 dep:
@@ -48,12 +54,11 @@ $(BIN): $(OBJ)
 	$(LD) $(OBJ) -o $(BIN) $(LDFLAGS)
 
 %.o: %.c
-	$(CC) -c $< -o $@ $(CFLAGS)
+	$(CC) -c $< -o $@ $(CFLAGS) $(CFLAGSX)
 
 clean:
 	-${RM} $(OBJ) $(BIN) $(DEP) 2> /dev/null
 
 
-###########
-##  EOF  ##
-###########
+##  EOF  
+#####################################

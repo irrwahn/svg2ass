@@ -1,9 +1,11 @@
 /*
- *	Project: svg2ass	
+ * Naive 2D graphics vector and matrix implementation.
+ * 
+ * Project: svg2ass	
  *    File: vect.h
  * Created: 2014-10-27
- *  Author: uw
-*/
+ *  Author: Urban Wallasch
+ */
 
 #ifndef H_VECT_INCLUDED
 #define H_VECT_INCLUDED
@@ -26,16 +28,27 @@ typedef struct {
 } mtx_t;
 
 
-#define VEC_ZERO	((vec_t){ 0, 0 })
-#define MTX_ZERO	((mtx_t){ 0, 0, 0,  0, 0, 0 })
-#define MTX_UNI		((mtx_t){ 1, 0, 0,  0, 1, 0 })
+#define VEC(X,Y)			((vec_t){(X),(Y)})
+#define MTX(A,C,E,B,D,F)	((mtx_t){(A),(C),(E),(B),(D),(F)})
 
+#define VEC_ZERO	VEC( 0, 0 )
 
-vec_t vec_add( vec_t a, vec_t b );
-vec_t vec_sub( vec_t a, vec_t b );
-vec_t vec_scal( vec_t a, double f );
+#define MTX_ZERO	MTX( 0, 0, 0,  \
+						 0, 0, 0 )
 
-vec_t mtx_vmul( mtx_t m, vec_t v );
+#define MTX_UNI		MTX( 1, 0, 0,  \
+						 0, 1, 0 )
+
+vec_t vec_add( vec_t u, vec_t v );
+vec_t vec_sub( vec_t u, vec_t v );
+vec_t vec_scal( vec_t u, double f );
+vec_t vec_mmul( mtx_t m, vec_t v );
+vec_t vec_norm( vec_t v, int dir );
+double vec_abs( vec_t v );
+double vec_dot( vec_t u, vec_t v );		// vector dot (scalar) product
+double vec_ang( vec_t u, vec_t v );
+int vec_eq( vec_t u, vec_t v, double e );
+
 mtx_t mtx_mmul( mtx_t m, mtx_t n );
 
 

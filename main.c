@@ -4,25 +4,23 @@
  *  Created: 2014-10-23
  *   Author: Urban Wallasch
  *
- * TODOs:
- *  - Actually test the more esoteric curveto path commands
- *  - Find a way to approximate arcs with Bezier curves
- *  - Clippath ???
- *
- * Notes:
- *  - Unicode support is borked (though UTF-8 should be mostly fine)
+ * TODO:
+ *  - Use cubic Bezier curves for elliptical path arcs
+ *  - Epsilon optimizations for path
+ *  - Improve error handling/propagation
+ *  - Implement clippath
  */
 
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
-#include <strings.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <float.h>
 #include <math.h>
 
+#include <strings.h>
 #include <unistd.h>
 
 #include "nxml.h"
@@ -44,6 +42,31 @@
 #define IPRINT(...)
 #endif
 
+/************************************************************
+ *	Math constants and helper
+ */
+
+#ifndef M_PI
+	#define M_PI 3.14159265358979323846
+#endif
+#define DEG2RAD(D)	((double)(D)*M_PI/180.0)
+#define RAD2DEG(R)	((double)(R)*180.0/M_PI)
+
+/* 
+ * Optimized cubic Bezier curve ellipse approximation factor.
+ * Ref: http://spencermortensen.com/articles/bezier-circle/ 
+ */
+#define BEZIER_CIRC 	0.551915024494
+
+/* 
+ * Dimensions smaller than EPSILON are treated as zero by select  
+ * operations to enable some trivial shortcuts and optimizations. 
+ * Chose a value considerably smaller than 1 to allow for upscaling 
+ * without introducing massive errors!
+ */
+#define DFLT_EPSILON	0.001
+
+
 
 /************************************************************
  *	Config and helper
@@ -59,6 +82,7 @@ static struct {
 	const char *ass_actor;	// actor name for event prefix
 	const char *ass_start;	// start time
 	const char *ass_end;	// end time
+	double epsilon;
 	FILE *of;
 	const char *progname;
 } config = {
@@ -69,6 +93,7 @@ static struct {
 	"",
 	"0:00:00.00",
 	"0:00:01.00",
+	DFLT_EPSILON,
 	NULL,
 	"svg2ass",
 };
@@ -215,7 +240,7 @@ int emitf( ctx_t *ctx, const char *fmt, ... )
 				break;
 			case 'v':
 				v = va_arg( arglist, vec_t );
-				v = mtx_vmul( ctx->ctm, v );
+				v = vec_mmul( ctx->ctm, v );
 				r = emit( "%s ", ftoa( buf, config.ass_fprec, v.x ) );
 				r = emit( "%s",  ftoa( buf, config.ass_fprec, v.y ) );
 				break;
@@ -241,7 +266,9 @@ enum {
 	ASS_START = 1,
 };
 
-// Start / finalize ASS drawing line
+/*
+ *  Start / finalize ASS drawing line
+ */
 static inline int ass_line( ctx_t *ctx, int mode )
 {
 	static int is_open = 0;
@@ -303,50 +330,99 @@ static inline const char *getStringAttr( const nxmlNode_t *node, char *attr )
 	return ( 0 <= a ) ? node->att[a].val : NULL;
 }
 
-static int parseStyles( ctx_t *ctx, const char *style )
+static int parseStyles( ctx_t *ctx, const nxmlNode_t *node )
 {
-	int n = 0;
-	int nocol = 3;
-	const char *s = style;
-	char name[100];
-	char value[100];
+	unsigned nocol = 0;
+	const char *s;
 
-	if ( !s || !*s )
-		return 0;
-	IPRINT( "style\n" );
-	while ( sscanf( s, " %99[^ :] : %99[^ ;] ;%n", name, value, &n ) == 2 )
+	// parse presentation attributes
+	IPRINT( "style (presentation attribute)\n" );
+	if ( NULL != ( s = getStringAttr( node, "fill" ) ) )
 	{
-		IPRINT( "    %s=%s\n", name, value );
-		if ( 0 == strcasecmp( name, "fill" ) && 0 != strcasecmp( value, "none" ) )
+		IPRINT( "    fill=%s\n", s );
+		if ( strstr( s, "none" ) )
+			nocol |= 1;
+		else
 		{
 			nocol &= ~1;
-			ctx->f_col = convColorBGR( value );
+			ctx->f_col = convColorBGR( s );
 		}
-		else if ( 0 == strcasecmp( name, "stroke" )  && 0 != strcasecmp( value, "none" ) )
+	}
+	if ( NULL != ( s = getStringAttr( node, "stroke" ) ) )
+	{
+		IPRINT( "    stroke=%s\n", s );
+		if ( strstr( s, "none" ) )
+			nocol |= 2;
+		else
 		{
 			nocol &= ~2;
-			ctx->s_col = convColorBGR( value );
+			ctx->s_col = convColorBGR( s );
 		}
-		else if ( 0 == strcasecmp( name, "fill-opacity" ) )
-			ctx->f_alpha = 255 - atof( value ) * 255;
-		else if ( 0 == strcasecmp( name, "stroke-opacity" ) )
-			ctx->s_alpha = 255 - atof( value ) * 255;
-		else if ( 0 == strcasecmp( name, "stroke-width" ) )
-			ctx->s_width = atof( value );
-		s += n;
 	}
+	if ( NULL != ( s = getStringAttr( node, "fill-opacity" ) ) )
+	{
+		IPRINT( "    fill-opacity=%s\n", s );
+		ctx->f_alpha = 255 - atof( s ) * 255;
+	}
+	if ( NULL != ( s = getStringAttr( node, "stroke-opacity" ) ) )
+	{
+		IPRINT( "    stroke-opacity=%s\n", s );
+		ctx->s_alpha = 255 - atof( s ) * 255;
+	}
+	if ( NULL != ( s = getStringAttr( node, "stroke-width" ) ) && *s  )
+	{
+		IPRINT( "    stroke-width=%s\n", s );
+		ctx->s_width = atof( s );
+	}
+
+	// parse inline CSS
+	IPRINT( "style (inline CSS)\n" );
+	if ( NULL != ( s = getStringAttr( node, "style" ) ) && *s )
+	{
+		int n = 0;
+		char name[100];
+		char value[100];
+
+		while ( sscanf( s, " %99[^ :] : %99[^ ;] ;%n", name, value, &n ) == 2 )
+		{
+			IPRINT( "    %s=%s\n", name, value );
+			if ( 0 == strcasecmp( name, "fill" ) )
+			{
+				if ( 0 == strcasecmp( value, "none" ) )
+					nocol |= 1;
+				else
+				{
+					nocol &= ~1;
+					ctx->f_col = convColorBGR( value );
+				}
+			}
+			else if ( 0 == strcasecmp( name, "stroke" ) )
+			{
+				if ( 0 == strcasecmp( value, "none" ) )
+					nocol |= 2;
+				else
+				{
+					nocol &= ~2;
+					ctx->s_col = convColorBGR( value );
+				}
+			}
+			else if ( 0 == strcasecmp( name, "fill-opacity" ) )
+				ctx->f_alpha = 255 - atof( value ) * 255;
+			else if ( 0 == strcasecmp( name, "stroke-opacity" ) )
+				ctx->s_alpha = 255 - atof( value ) * 255;
+			else if ( 0 == strcasecmp( name, "stroke-width" ) )
+				ctx->s_width = atof( value );
+			s += n;
+		}
+	}
+	
+	// a color set to "none" is emulated by setting full transparency
 	if ( nocol & 1 )
 		ctx->f_alpha = 255;
 	if ( nocol & 2 )
 		ctx->s_alpha = 255;
 	return 0;
 }
-
-
-#ifndef M_PI
-	#define M_PI 3.14159265358979323846
-#endif
-#define DEG2RAD(D)	((double)(D)/180.0*M_PI)
 
 static int parseTransform( ctx_t *ctx, const char *trf )
 {
@@ -453,35 +529,49 @@ static int parseTransform( ctx_t *ctx, const char *trf )
  *	SVG parsing and ASS drawing
  */
 
-#define BEZIER_CIRC 	0.551915024494
-
-static int ass_rect( ctx_t *ctx, vec_t o, vec_t d, vec_t r )
+static int ass_roundrect( ctx_t *ctx, vec_t o, vec_t d, vec_t r )
 {
+	int res = 0;
 	vec_t c, v0, v1, v2, v3, rq;
+	int h_edge, v_edge;
 
 	if ( d.x / 2 < r.x )
 		r.x = d.x / 2;
 	if ( d.y / 2 < r.y )
 		r.y = d.y / 2;
-	rq = vec_scal( r, BEZIER_CIRC );
-	v0.x = o.x + r.x;	v0.y = o.y;
-	emitf( ctx, "m %v ", v0 );
 	
-	if ( 2 * r.x < d.x )
-	{
+	if ( config.epsilon > r.x && config.epsilon > r.y )	// square corner shortcut
+	{	
+		if ( config.epsilon > d.x && config.epsilon > d.y )	// tiny extent optimization
+			res = emitf( ctx, "m %v l %v ", o, VEC( o.x+config.epsilon, o.y ) );
+		else
+			res = emitf( ctx, "m %v l %v %v %v ", o, (vec_t){o.x+d.x, o.y},
+						vec_add( o, d ), (vec_t){o.x, o.y+d.y} );
+		return res;
+	}
+
+	// prepare parameters, move to start position
+	rq = vec_scal( r, BEZIER_CIRC );
+	h_edge = config.epsilon < ( d.x - 2 * r.x );
+	v_edge = config.epsilon < ( d.y - 2 * r.y );
+	v0.x = o.x + r.x;	v0.y = o.y;
+	res += emitf( ctx, "m %v ", v0 );
+
+	if ( h_edge )
+	{	// upper edge
 		v0.x = o.x + d.x - r.x;	v0.y = o.y;
-		emitf( ctx, "l %v ", v0 );
+		res += emitf( ctx, "l %v ", v0 );
 	}
 	c.x = v0.x;			c.y = v0.y + r.y;
 	v1.x = c.x + rq.x;	v1.y = c.y - r.y;
 	v2.x = c.x + r.x;	v2.y = c.y - rq.y;
 	v3.x = c.x + r.x;	v3.y = c.y;
-	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
+	res += emitf( ctx, "b %v %v %v ", v1, v2, v3 );
 
-	if ( 2 * r.y < d.y )
-	{
+	if ( v_edge )
+	{	// right edge
 		v0.x = o.x + d.x;	v0.y = o.y + d.y - r.y;
-		emitf( ctx, "l %v ", v0 );
+		res += emitf( ctx, "l %v ", v0 );
 	}
 	else
 		v0 = v3;
@@ -489,12 +579,12 @@ static int ass_rect( ctx_t *ctx, vec_t o, vec_t d, vec_t r )
 	v1.x = c.x + r.x;	v1.y = c.y + rq.y;
 	v2.x = c.x + rq.x;	v2.y = c.y + r.y;
 	v3.x = c.x;			v3.y = c.y + r.y;
-	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
+	res += emitf( ctx, "b %v %v %v ", v1, v2, v3 );
 	
-	if ( 2 * r.x < d.x )
-	{
+	if ( h_edge )
+	{	// lower edge
 		v0.x = o.x + r.x;	v0.y = o.y + d.y;
-		emitf( ctx, "l %v ", v0 );
+		res += emitf( ctx, "l %v ", v0 );
 	}
 	else
 		v0 = v3;
@@ -502,12 +592,12 @@ static int ass_rect( ctx_t *ctx, vec_t o, vec_t d, vec_t r )
 	v1.x = c.x - rq.x;	v1.y = c.y + r.y;
 	v2.x = c.x - r.x;	v2.y = c.y + rq.y;
 	v3.x = c.x - r.x;	v3.y = c.y;
-	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
+	res += emitf( ctx, "b %v %v %v ", v1, v2, v3 );
 
-	if ( 2 * r.y < d.y )
-	{
+	if ( v_edge )
+	{	// left edge
 		v0.x = o.x;			v0.y = o.y + r.y;
-		emitf( ctx, "l %v ", v0 );
+		res += emitf( ctx, "l %v ", v0 );
 	}
 	else
 		v0 = v3;
@@ -515,67 +605,109 @@ static int ass_rect( ctx_t *ctx, vec_t o, vec_t d, vec_t r )
 	v1.x = c.x - r.x;	v1.y = c.y - rq.y;
 	v2.x = c.x - rq.x;	v2.y = c.y - r.y;
 	v3.x = c.x;			v3.y = c.y - r.y;
-	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
-	return 0;
+	res += emitf( ctx, "b %v %v %v ", v1, v2, v3 );
+	
+	return res;
 }
 
 static int ass_ellipse( ctx_t *ctx, vec_t c, vec_t r )
 {
-#if 1
+	if ( config.epsilon > r.x && config.epsilon > r.y )
+	{	// tiny radius shortcut
+		return emitf( ctx, "m %v l %v ", c, vec_add( c, VEC(1,0) ) );
+	}
 	// Ellipses are basically just degenerate rounded rects.
-	return ass_rect( ctx, vec_sub( c, r ), vec_scal( r, 2.0 ), r );
-#else
-	/*
-	Approximate a circle using four Bézier curves:
-	P_0 = (0,1),  P_1 = (c,1),   P_2 = (1,c),   P_3 = (1,0)
-	P_0 = (1,0),  P_1 = (1,-c),  P_2 = (c,-1),  P_3 = (0,-1)
-	P_0 = (0,-1), P_1 = (-c,-1), P_2 = (-1,-c), P_3 = (-1,0)
-	P_0 = (-1,0), P_1 = (-1,c),  P_2 = (-c,1),  P_3 = (0,1)
-	with c = 0.551915024494
-	[ http://spencermortensen.com/articles/bezier-circle/ ]
-	*/
-	vec_t v0, v1, v2, v3;
-	vec_t rq = vec_scal( r, BEZIER_CIRC );
-
-	v0.x = c.x;			v0.y = c.y + r.y;
-	emitf( ctx, "m %v ", v0 );
-	v1.x = c.x + rq.x;	v1.y = c.y + r.y;
-	v2.x = c.x + r.x;	v2.y = c.y + rq.y;
-	v3.x = c.x + r.x;	v3.y = c.y;
-	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
-	v1.x = c.x + r.x;	v1.y = c.y - rq.y;
-	v2.x = c.x + rq.x;	v2.y = c.y - r.y;
-	v3.x = c.x;			v3.y = c.y - r.y;
-	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
-	v1.x = c.x - rq.x;	v1.y = c.y - r.y;
-	v2.x = c.x - r.x;	v2.y = c.y - rq.y;
-	v3.x = c.x - r.x;	v3.y = c.y;
-	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
-	v1.x = c.x - r.x;	v1.y = c.y + rq.y;
-	v2.x = c.x - rq.x;	v2.y = c.y + r.y;
-	v3.x = c.x;			v3.y = c.y + r.y;
-	emitf( ctx, "b %v %v %v ", v1, v2, v3 );
-	return 0;
-#endif
+	return ass_roundrect( ctx, vec_sub( c, r ), vec_scal( r, 2.0 ), r );
 }
 
-static int ass_arc( ctx_t *ctx, vec_t v0, vec_t r, double rot, int larc, int swp, vec_t v )
+static int ass_arc( ctx_t *ctx, vec_t v0, vec_t r, double phi, int fa, int fs, vec_t v )
 {
-#if 0
-	// TODO: draw elliptical arc using cubic Bézier curves. Ugh!
-#else
-	err( ELVL_WARNING, 0, "SVG path arc command not implemented!" );
-	emitf( ctx, "l %v ", v );
-	(void)v0; (void)r; (void)rot; (void)larc; (void)swp;
-#endif
-	return 0;
+	// Draw an elliptical arc, Ref:
+	// http://www.w3.org/TR/SVG/implnote.html#ArcSyntax
+	
+	// Validate and normalize parameters:
+	// F.6.2 drop arc, if endpoints identical
+	if ( vec_eq( v0, v, 0 ) )
+		return 0;
+	// F.6.6 Step 1: Ensure radii are non-zero (otherwise draw straight line)
+	if ( config.epsilon > r.x || config.epsilon > r.y || vec_eq( v0, v, config.epsilon ) )
+		return emitf( ctx, "l %v ", v );
+	// F.6.6 Step 2: Ensure radii are positive
+	r.x = fabs( r.x );
+	r.y = fabs( r.y );
+	// F.6.6 Step 3: Ensure radii are large enough
+	//////////////
+	// TODO: If rx, ry and φ are such that there is no solution 
+	// (basically, the ellipse is not big enough to reach from (x1, y1)
+	// to (x2, y2)) then the ellipse is scaled up uniformly until
+	// there is exactly one solution (until the ellipse is just big enough).
+	//////////////
+	// F.6.2 rotation angle mod 360
+	phi = DEG2RAD( fmod( phi, 360.0 ) );
+	// F.6.2 normalize flags
+	fa = !!fa;
+	fs = !!fs;
+	
+	// F.6.5 Conversion from endpoint to center parameterization, Ref:
+	// http://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
+
+	double f, t, t1, dt;
+	vec_t p, cp, h1, h2;
+	vec_t c;
+	mtx_t rot = MTX( cos(phi), sin(phi), 0,  -sin(phi), cos(phi), 0 );
+
+	// F.6.5 Step 1: Compute (x1′, y1′)
+	p = vec_mmul( rot, vec_scal( vec_sub( v0, v ), 0.5 ) );
+	// F.6.5 Step 2: Compute (cx′, cy′)
+	f = sqrt( fabs( (r.x*r.x*r.y*r.y - r.x*r.x*p.y*p.y - r.y*r.y*p.x*p.x) 
+		/ (r.x*r.x*p.y*p.y + r.y*r.y*p.x*p.x) ) );
+	cp = vec_scal( VEC( r.x*p.y/r.y, -r.y*p.x/r.x ), fa==fs?-f:f );
+	
+	// F.6.5 Step 3: Compute (cx, cy) from (cx′, cy′)
+	rot.b = -rot.b;
+	rot.c = -rot.c;
+	c = vec_add( vec_mmul( rot, cp ), vec_scal( vec_add( v0, v ), 0.5 ) );
+
+	// F.6.5 Step 4: Compute θ1 and Δθ
+	h1 = VEC( (p.x-cp.x)/r.x, (p.y-cp.y)/r.y ); 
+	h2 = VEC( (-p.x-cp.x)/r.x, (-p.y-cp.y)/r.y ); 
+	t1 = vec_ang( VEC(1,0), h1 );
+	dt = vec_ang( h1, h2 );
+	
+	// Perform the sweep in specified direction and draw arc segments
+	double step = M_PI / ( 0.36 * ( r.x + r.y ) );
+	// TODO: use bezier curves instead of lines
+	emit( "l " );
+	if ( fs )
+	{
+		if ( 0.0 > dt )
+			dt += M_PI*2;
+		//DPRINT( "fa=%d, fs=%d, t1=%g, dt=%g, step=%g\n", fa, fs, RAD2DEG(t1), RAD2DEG(dt), RAD2DEG(step) );
+		for ( t = 0.0; t < dt; t += step )
+		{
+			p = vec_add( vec_mmul( rot, VEC( r.x*cos(t1+t), r.y*sin(t1+t) ) ), c );
+			emitf( ctx, "%v ", p );
+		}
+	}
+	else
+	{
+		if ( 0.0 < dt )
+			dt -= M_PI*2;
+		//DPRINT( "fa=%d, fs=%d, t1=%g, dt=%g, step=%g\n", fa, fs, RAD2DEG(t1), RAD2DEG(dt), RAD2DEG(step) );
+		for ( t = 0.0; t > dt; t -= step )
+		{
+			p = vec_add( vec_mmul( rot, VEC( r.x*cos(t1+t), r.y*sin(t1+t) ) ), c );
+			emitf( ctx, "%v ", p );
+		}
+	}
+	return emitf( ctx, "%v", v );
 }
 
 /*
  * Path parser logic shamelessly stolen from libsvgtiny:
  * http://www.netsurf-browser.org/projects/libsvgtiny/
  */
-static int parsePath( ctx_t *ctx, const char *pd )
+static int ass_path( ctx_t *ctx, const char *pd )
 {
 	int res = 0;
 	char *s, *d;
@@ -584,6 +716,8 @@ static int parsePath( ctx_t *ctx, const char *pd )
 	vec_t last_quad = last;
 	vec_t subpath_first = last;
 
+	if ( !pd || !*pd )
+		return 0;
 	/* obtain a clean copy of path */
 	if ( NULL == ( d = strdup( pd ) ) )
 		return -1;
@@ -762,8 +896,8 @@ static int parsePath( ctx_t *ctx, const char *pd )
 			do
 			{
 				if ( *svg_cmd == 'a' )
-					vec_add( v, last );
-				ass_arc( ctx, last, r, rot, larc, swp, v );
+					v = vec_add( v, last );
+				res = ass_arc( ctx, last, r, rot, larc, swp, v );
 				last_cubic = last_quad = last = v;
 				s += n;
 			}
@@ -773,6 +907,7 @@ static int parsePath( ctx_t *ctx, const char *pd )
 		/* invalid path syntax */
 		else {
 			err( ELVL_WARNING, 0, "parsePath failed at \"%s\"", s );
+			errno = EINVAL;
 			res = -1;
 			break;
 		}
@@ -781,11 +916,33 @@ static int parsePath( ctx_t *ctx, const char *pd )
 	return res;
 }
 
+static int ass_polyline( ctx_t *ctx, const char *pt )
+{
+	int res = -1;
+	int n;
+	char *d;
+	float dummy;
+			
+	if ( pt && *pt 
+		&& sscanf( pt, "%f ,%f %n", &dummy, &dummy, &n ) == 2
+		&& NULL != ( d = malloc( strlen( pt ) + 4 + 1 ) ) )
+	{	
+		strcpy( d, "M " );
+		strncat( d, pt, n );
+		strcat( d, "L " );
+		strcat( d, pt + n );
+		res = ass_path( ctx, d );	// Ain't we sneaky?
+		free( d );
+	}
+	return res;
+}
+
 /*
  * Callback function for XML parser
  */
 static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 {
+	int res = 0;
 	ctx_t *ctx = usr;
 	vec_t v1, v2, c, r;
 
@@ -800,33 +957,41 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 		if ( 0 == strcasecmp( node->name, "svg" ) )
 		{
 			if ( ctx->in_svg )
-				err( ELVL_WARNING, 0, "Warning: nested <svg> element!" );
-			ctx->in_svg = 1;
+				err( ELVL_WARNING, 0, "nested <svg> element!" );
+			ctx->in_svg++;
 		}
 		if ( !ctx->in_svg )
 			break;
-		IPRINT( "%s {\n", node->name );
+		IPRINT( "<%s \n", node->name );
 		if ( 0 != ctx_push( ctx ) )
 			err( ELVL_FATAL, 0, "context stack push: %s", strerror( errno ) );
-		parseStyles( ctx, getStringAttr( node, "style" ) );
-		parseTransform( ctx, getStringAttr( node, "transform" ) );
 
-		if ( 0 == strcasecmp( node->name, "g" ) )
+		if ( 0 == strcasecmp( node->name, "svg" ) )
 		{
-			// no special action for <g>roups yet
+			parseStyles( ctx, node );
+			parseTransform( ctx, getStringAttr( node, "transform" ) );
+		}
+		else if ( 0 == strcasecmp( node->name, "g" ) )
+		{
+			parseStyles( ctx, node );
+			parseTransform( ctx, getStringAttr( node, "transform" ) );
 		}
 		else if ( 0 == strcasecmp( node->name,  "line" ) )
 		{
+			parseStyles( ctx, node );
+			parseTransform( ctx, getStringAttr( node, "transform" ) );
 			ass_line( ctx, ASS_START );
 			v1.x = ctx->org.x + getNumericAttr( node, "x1" );
 			v1.y = ctx->org.y + getNumericAttr( node, "y1" );
 			v2.x = ctx->org.x + getNumericAttr( node, "x2" );
 			v2.y = ctx->org.y + getNumericAttr( node, "y2" );
 			IPRINT( "x1=%g, y1=%g, x2=%g, y2=%g\n", v1.x, v1.y, v2.x, v2.y );
-			emitf( ctx, "m %v l %v ", v1, v2 );
+			res = emitf( ctx, "m %v l %v ", v1, v2 );
 		}
 		else if ( 0 == strcasecmp( node->name, "rect" ) )
 		{
+			parseStyles( ctx, node );
+			parseTransform( ctx, getStringAttr( node, "transform" ) );
 			ass_line( ctx, 	ASS_START );
 			v1.x = ctx->org.x + getNumericAttr( node, "x" );
 			v1.y = ctx->org.y + getNumericAttr( node, "y" );
@@ -834,56 +999,55 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 			v2.y = getNumericAttr( node, "height" );
 			r.x = getNumericAttr( node, "rx" );
 			r.y = getNumericAttr( node, "ry" );
-	
 			if ( 0 > r.x )	r.x = 0;
 			if ( 0 > r.y )	r.y = 0;
 			if ( 0 == r.x )	r.x = r.y;
 			if ( 0 == r.y )	r.y = r.x;
-			if ( 0 == r.x && 0 == r.y )
-			{
-				IPRINT( "x=%g, y=%g, w=%g, h=%g\n", v1.x, v1.y, v2.x, v2.y );
-				emitf( ctx, "m %v l %v %v %v", v1, (vec_t){v1.x+v2.x, v1.y},
-						vec_add( v1, v2 ), (vec_t){v1.x, v1.y+v2.y} );
-			}
-			else
-			{
-				IPRINT( "x=%g, y=%g, w=%g, h=%g, rx=%f, ry=%f\n", 
+			IPRINT( "x=%g, y=%g, w=%g, h=%g, rx=%f, ry=%f\n", 
 						v1.x, v1.y, v2.x, v2.y, r.x, r.y );
-				ass_rect( ctx, v1, v2, r );
-			}
+			res = ass_roundrect( ctx, v1, v2, r );
 		}
 		else if ( 0 == strcasecmp( node->name, "circle" ) )
 		{
+			parseStyles( ctx, node );
+			parseTransform( ctx, getStringAttr( node, "transform" ) );
 			ass_line( ctx, ASS_START );
 			c.x = ctx->org.x + getNumericAttr( node, "cx" );
 			c.y = ctx->org.y + getNumericAttr( node, "cy" );
 			r.x = r.y = getNumericAttr( node, "r" );
 			IPRINT( "x=%g, y=%g, r=%g\n", c.x, c.y, r.x );
-			ass_ellipse( ctx, c, r );
+			res = ass_ellipse( ctx, c, r );
 		}
 		else if ( 0 == strcasecmp( node->name, "ellipse" ) )
 		{
+			parseStyles( ctx, node );
+			parseTransform( ctx, getStringAttr( node, "transform" ) );
 			ass_line( ctx, ASS_START );
 			c.x = ctx->org.x + getNumericAttr( node, "cx" );
 			c.y = ctx->org.y + getNumericAttr( node, "cy" );
 			r.x = getNumericAttr( node, "rx" );
 			r.y = getNumericAttr( node, "ry" );
 			IPRINT( "x=%g, y=%g, rx=%g, ry=%g\n", c.x, c.y, r.x, r.y );
-			ass_ellipse( ctx, c, r );
+			res = ass_ellipse( ctx, c, r );
 		}
 		else if ( 0 == strcasecmp( node->name, "path" ) )
 		{
+			parseStyles( ctx, node );
+			parseTransform( ctx, getStringAttr( node, "transform" ) );
 			ass_line( ctx, ASS_START );
-			parsePath( ctx, getStringAttr( node, "d" ) );
+			res = ass_path( ctx, getStringAttr( node, "d" ) );
+		}
+		else if ( 0 == strcasecmp( node->name, "polyline" ) 
+				|| 0 == strcasecmp( node->name, "polygon" ) )
+		{
+			parseStyles( ctx, node );
+			parseTransform( ctx, getStringAttr( node, "transform" ) );
+			ass_line( ctx, ASS_START );
+			res = ass_polyline( ctx, getStringAttr( node, "points" ) );
 		}
 		else
 		{
-			/* (yet) unhandled relevant tags:
-			 * polyline, polygon: easily converted to SVG paths!
-			 * text: Forget it, why would you want to export SVG
-			 *       text to ASS?!? (or simply convert to path)
-			 * clippath: maybe later, maybe never
-			 */
+			//IPRINT( "*ignored*\n" );
 		}
 		break;
 
@@ -892,12 +1056,12 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 		{
 			if ( !ctx->in_svg )
 				err( ELVL_WARNING, 0, "excess </svg> element!" );
-			ctx->in_svg = 0;
+			ctx->in_svg--;
 		}
 		ctx_pop( ctx );
 		if ( !ctx->in_svg )
 			break;
-		IPRINT( "}\n" );
+		IPRINT( "/>\n" );
 		break;
 
 	default:
@@ -905,7 +1069,12 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 	}
 	if ( 1 == config.ass_mode )
 		ass_line( ctx, ASS_CLOSE );
-	return 0;
+	if ( 0 != res )
+	{	// report errors, but keep going!
+		err( ELVL_ERROR, 0, "%s: %s", __func__, strerror( errno ) );
+		res = 0;
+	}
+	return res;
 }
 
 
@@ -990,6 +1159,8 @@ static int usage( const char *progname, int version_only )
 		"  -a num\n"
 		"     ASS mode, 0 = single draw command per file, 1 = one line per shape; default: 1\n"
 		"     Mode 0 will use the same color for all shapes!\n"
+		"  -e num\n"
+		"     Set the epsilon used for element optimizations; default: %g\n"
 		"  -f num\n"
 		"     Numerical precision for ASS output in the range 0-%d; default: 1\n"
 		"     Zero fractional parts are stripped. Does not affect internal math precision.\n"
@@ -1005,6 +1176,7 @@ static int usage( const char *progname, int version_only )
 		"     ASS dialog actor name; default: empty\n"
 		"  -T string\n"
 		"     ASS dialog style name; default: Default\n"
+		, DFLT_EPSILON
 		, MAX_FPREC
 	);
 	return 0;
@@ -1015,7 +1187,7 @@ int main( int argc, char** argv )
 {
 	int nfiles = 0;
 	int opt;
-	const char *ostr = "-:a:f:ho:vA:E:L:S:T:";
+	const char *ostr = "-:a:e:f:ho:vA:E:L:S:T:";
 	FILE *ifp;
 
 	config.of = stdout;
@@ -1036,6 +1208,9 @@ int main( int argc, char** argv )
 			break;
 		case 'a':
 			config.ass_mode = atoi( optarg );
+			break;
+		case 'e':
+			config.epsilon = atof( optarg );
 			break;
 		case 'f':
 			config.ass_fprec = atoi( optarg );
