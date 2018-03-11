@@ -1,10 +1,12 @@
 /*
  * NXML is not an XML parser.
- * 
- * Project: svg2ass	
+ *
+ * Project: svg2ass
  *    File: nxml.c
  * Created: 2014-10-27
  *  Author: Urban Wallasch
+ *
+ *  See LICENSE file for more details.
  */
 
 #include <stdio.h>
@@ -18,8 +20,8 @@
 
 #ifdef DEBUG
 #include <assert.h>
-#define WHOAMI() 	fprintf( stderr, "%d %s\n", __LINE__, __func__ ); 
-#define DPRINT(...) fprintf( stderr, __VA_ARGS__ ); 
+#define WHOAMI() 	fprintf( stderr, "%d %s\n", __LINE__, __func__ );
+#define DPRINT(...) fprintf( stderr, __VA_ARGS__ );
 #else
 #define assert(...)
 #define WHOAMI()
@@ -77,7 +79,7 @@ static inline char *parseAttrib( char *p, nxmlNode_t *node )
 	char *m = p;
 	char *ns, *ne, *vs, *ve;
 	int quot = 0;
-	
+
 	while ( 1 )
 	{
 		while ( is_space( *m ) )
@@ -141,9 +143,9 @@ static inline char *parseMarkup( char *p, nxmlNode_t *node )
 		{ "!DOCTYPE",	8, 	">", 	1, NXML_TYPE_DOCTYPE },	// doctype definition
 		{ NULL, 0, NULL, 0, NXML_TYPE_EMPTY },
 	};
-	
-	node->type = NXML_TYPE_EMPTY;	
-	
+
+	node->type = NXML_TYPE_EMPTY;
+
 	if ( is_namestart( *m ) ) // match parent/self tag
 	{
 		node->type = NXML_TYPE_PARENT;	// tentative!
@@ -155,7 +157,7 @@ static inline char *parseMarkup( char *p, nxmlNode_t *node )
 		while ( *m && '>' != *m )
 		{	// skip any broken attribute garbage!
 			// TODO: match quotes?
-			++m; 
+			++m;
 		}
 		if ( '/' == *(m-1) )
 			node->type = NXML_TYPE_SELF;
@@ -164,7 +166,7 @@ static inline char *parseMarkup( char *p, nxmlNode_t *node )
 	{
 		++m;
 		if ( is_namechar( *m ) )
-			node->type = NXML_TYPE_END;	
+			node->type = NXML_TYPE_END;
 		node->name = m;
 		while ( is_namechar( *m ) )
 			++m;
@@ -191,12 +193,12 @@ static inline char *parseMarkup( char *p, nxmlNode_t *node )
 			}
 		}
 	}
-	
+
 	while ( *m && '>' != *m++ )
 		;
 	*e = '\0';
 	return m;
-}	
+}
 
 // internal parser states
 enum state {
@@ -213,8 +215,8 @@ int nxmlParse( char *buf, nxmlCb_t cb, void *usr )
 	char *p, *m = buf;
 	enum state state = ST_BEGIN;
 	nxmlNode_t node;
-	
-	memset( &node, 0, sizeof node );	
+
+	memset( &node, 0, sizeof node );
 
 	while ( ST_STOP != state )
 	{

@@ -4,6 +4,8 @@
  *  Created: 2014-10-23
  *   Author: Urban Wallasch
  *
+ * See LICENSE file for more details.
+ *
  * TODO:
  *  - Use cubic Bezier curves for elliptical path arcs
  *  - Epsilon optimizations for path
@@ -52,16 +54,16 @@
 #define DEG2RAD(D)	((double)(D)*M_PI/180.0)
 #define RAD2DEG(R)	((double)(R)*180.0/M_PI)
 
-/* 
+/*
  * Optimized cubic Bezier curve ellipse approximation factor.
- * Ref: http://spencermortensen.com/articles/bezier-circle/ 
+ * Ref: http://spencermortensen.com/articles/bezier-circle/
  */
 #define BEZIER_CIRC 	0.551915024494
 
-/* 
- * Dimensions smaller than EPSILON are treated as zero by select  
- * operations to enable some trivial shortcuts and optimizations. 
- * Chose a value considerably smaller than 1 to allow for upscaling 
+/*
+ * Dimensions smaller than EPSILON are treated as zero by select
+ * operations to enable some trivial shortcuts and optimizations.
+ * Chose a value considerably smaller than 1 to allow for upscaling
  * without introducing massive errors!
  */
 #define DFLT_EPSILON	0.001
@@ -415,7 +417,7 @@ static int parseStyles( ctx_t *ctx, const nxmlNode_t *node )
 			s += n;
 		}
 	}
-	
+
 	// a color set to "none" is emulated by setting full transparency
 	if ( nocol & 1 )
 		ctx->f_alpha = 255;
@@ -539,9 +541,9 @@ static int ass_roundrect( ctx_t *ctx, vec_t o, vec_t d, vec_t r )
 		r.x = d.x / 2;
 	if ( d.y / 2 < r.y )
 		r.y = d.y / 2;
-	
+
 	if ( config.epsilon > r.x && config.epsilon > r.y )	// square corner shortcut
-	{	
+	{
 		if ( config.epsilon > d.x && config.epsilon > d.y )	// tiny extent optimization
 			res = emitf( ctx, "m %v l %v ", o, VEC( o.x+config.epsilon, o.y ) );
 		else
@@ -580,7 +582,7 @@ static int ass_roundrect( ctx_t *ctx, vec_t o, vec_t d, vec_t r )
 	v2.x = c.x + rq.x;	v2.y = c.y + r.y;
 	v3.x = c.x;			v3.y = c.y + r.y;
 	res += emitf( ctx, "b %v %v %v ", v1, v2, v3 );
-	
+
 	if ( h_edge )
 	{	// lower edge
 		v0.x = o.x + r.x;	v0.y = o.y + d.y;
@@ -606,7 +608,7 @@ static int ass_roundrect( ctx_t *ctx, vec_t o, vec_t d, vec_t r )
 	v2.x = c.x - rq.x;	v2.y = c.y - r.y;
 	v3.x = c.x;			v3.y = c.y - r.y;
 	res += emitf( ctx, "b %v %v %v ", v1, v2, v3 );
-	
+
 	return res;
 }
 
@@ -624,7 +626,7 @@ static int ass_arc( ctx_t *ctx, vec_t v0, vec_t r, double phi, int fa, int fs, v
 {
 	// Draw an elliptical arc, Ref:
 	// http://www.w3.org/TR/SVG/implnote.html#ArcSyntax
-	
+
 	// Validate and normalize parameters:
 	// F.6.2 drop arc, if endpoints identical
 	if ( vec_eq( v0, v, 0 ) )
@@ -637,7 +639,7 @@ static int ass_arc( ctx_t *ctx, vec_t v0, vec_t r, double phi, int fa, int fs, v
 	r.y = fabs( r.y );
 	// F.6.6 Step 3: Ensure radii are large enough
 	//////////////
-	// TODO: If rx, ry and φ are such that there is no solution 
+	// TODO: If rx, ry and φ are such that there is no solution
 	// (basically, the ellipse is not big enough to reach from (x1, y1)
 	// to (x2, y2)) then the ellipse is scaled up uniformly until
 	// there is exactly one solution (until the ellipse is just big enough).
@@ -647,7 +649,7 @@ static int ass_arc( ctx_t *ctx, vec_t v0, vec_t r, double phi, int fa, int fs, v
 	// F.6.2 normalize flags
 	fa = !!fa;
 	fs = !!fs;
-	
+
 	// F.6.5 Conversion from endpoint to center parameterization, Ref:
 	// http://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
 
@@ -659,21 +661,21 @@ static int ass_arc( ctx_t *ctx, vec_t v0, vec_t r, double phi, int fa, int fs, v
 	// F.6.5 Step 1: Compute (x1′, y1′)
 	p = vec_mmul( rot, vec_scal( vec_sub( v0, v ), 0.5 ) );
 	// F.6.5 Step 2: Compute (cx′, cy′)
-	f = sqrt( fabs( (r.x*r.x*r.y*r.y - r.x*r.x*p.y*p.y - r.y*r.y*p.x*p.x) 
+	f = sqrt( fabs( (r.x*r.x*r.y*r.y - r.x*r.x*p.y*p.y - r.y*r.y*p.x*p.x)
 		/ (r.x*r.x*p.y*p.y + r.y*r.y*p.x*p.x) ) );
 	cp = vec_scal( VEC( r.x*p.y/r.y, -r.y*p.x/r.x ), fa==fs?-f:f );
-	
+
 	// F.6.5 Step 3: Compute (cx, cy) from (cx′, cy′)
 	rot.b = -rot.b;
 	rot.c = -rot.c;
 	c = vec_add( vec_mmul( rot, cp ), vec_scal( vec_add( v0, v ), 0.5 ) );
 
 	// F.6.5 Step 4: Compute θ1 and Δθ
-	h1 = VEC( (p.x-cp.x)/r.x, (p.y-cp.y)/r.y ); 
-	h2 = VEC( (-p.x-cp.x)/r.x, (-p.y-cp.y)/r.y ); 
+	h1 = VEC( (p.x-cp.x)/r.x, (p.y-cp.y)/r.y );
+	h2 = VEC( (-p.x-cp.x)/r.x, (-p.y-cp.y)/r.y );
 	t1 = vec_ang( VEC(1,0), h1 );
 	dt = vec_ang( h1, h2 );
-	
+
 	// Perform the sweep in specified direction and draw arc segments
 	double step = M_PI / ( 0.36 * ( r.x + r.y ) );
 	// TODO: use bezier curves instead of lines
@@ -922,11 +924,11 @@ static int ass_polyline( ctx_t *ctx, const char *pt )
 	int n;
 	char *d;
 	float dummy;
-			
-	if ( pt && *pt 
+
+	if ( pt && *pt
 		&& sscanf( pt, "%f ,%f %n", &dummy, &dummy, &n ) == 2
 		&& NULL != ( d = malloc( strlen( pt ) + 4 + 1 ) ) )
-	{	
+	{
 		strcpy( d, "M " );
 		strncat( d, pt, n );
 		strcat( d, "L " );
@@ -1003,7 +1005,7 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 			if ( 0 > r.y )	r.y = 0;
 			if ( 0 == r.x )	r.x = r.y;
 			if ( 0 == r.y )	r.y = r.x;
-			IPRINT( "x=%g, y=%g, w=%g, h=%g, rx=%f, ry=%f\n", 
+			IPRINT( "x=%g, y=%g, w=%g, h=%g, rx=%f, ry=%f\n",
 						v1.x, v1.y, v2.x, v2.y, r.x, r.y );
 			res = ass_roundrect( ctx, v1, v2, r );
 		}
@@ -1037,7 +1039,7 @@ static int svg2ass( nxmlEvent_t evt, const nxmlNode_t *node, void *usr )
 			ass_line( ctx, ASS_START );
 			res = ass_path( ctx, getStringAttr( node, "d" ) );
 		}
-		else if ( 0 == strcasecmp( node->name, "polyline" ) 
+		else if ( 0 == strcasecmp( node->name, "polyline" )
 				|| 0 == strcasecmp( node->name, "polygon" ) )
 		{
 			parseStyles( ctx, node );

@@ -1,10 +1,12 @@
 /*
  * NXML is not an XML parser.
- * 
- * Project: svg2ass	
+ *
+ * Project: svg2ass
  *    File: nxml.h
  * Created: 2014-10-27
  *  Author: Urban Wallasch
+ *
+ * See LICENSE file for more details.
  */
 
 #ifndef H_NXML_INCLUDED

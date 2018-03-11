@@ -1,10 +1,12 @@
 /*
  * Naive 2-D graphics vector and matrix implementation.
- * 
- * Project: svg2ass	
+ *
+ * Project: svg2ass
  *    File: vect.c
  * Created: 2014-10-27
  *  Author: Urban Wallasch
+ *
+ * See LICENSE file for more details.
  */
 
 #include <math.h>
@@ -46,7 +48,7 @@ double vec_abs( vec_t v )
 
 double vec_dot( vec_t u, vec_t v )
 {
-	return u.x * v.x + u.y * v.y; 
+	return u.x * v.x + u.y * v.y;
 }
 
 double vec_ang( vec_t u, vec_t v )

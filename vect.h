@@ -1,10 +1,12 @@
 /*
  * Naive 2D graphics vector and matrix implementation.
- * 
- * Project: svg2ass	
+ *
+ * Project: svg2ass
  *    File: vect.h
  * Created: 2014-10-27
  *  Author: Urban Wallasch
+ *
+ * See LICENSE file for more details.
  */
 
 #ifndef H_VECT_INCLUDED
@@ -22,7 +24,7 @@ typedef struct {
 
 typedef struct {
 	// order matches SVG transform matrix!
-	double a, c, e;	
+	double a, c, e;
 	double b, d, f;
 	//     0  0  1	implied!
 } mtx_t;
