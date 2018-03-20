@@ -1,0 +1,4 @@
+*.o
+*.dep
+svg2ass
+version.h
