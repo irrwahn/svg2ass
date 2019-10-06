@@ -61,6 +61,12 @@
 #define BEZIER_CIRC 	0.551915024494
 
 /*
+ * For the elliptical arc approximation we generate one line segment
+ * per specified units of estimated arc length.
+ */
+#define DFLT_ARCLINE	4.0
+
+/*
  * Dimensions smaller than EPSILON are treated as zero by select
  * operations to enable some trivial shortcuts and optimizations.
  * Chose a value considerably smaller than 1 to allow for upscaling
@@ -85,6 +91,7 @@ static struct {
 	const char *ass_start;	// start time
 	const char *ass_end;	// end time
 	double epsilon;
+	double arcline;
 	FILE *of;
 	const char *progname;
 } config = {
@@ -96,6 +103,7 @@ static struct {
 	"0:00:00.00",
 	"0:00:01.00",
 	DFLT_EPSILON,
+	DFLT_ARCLINE,
 	NULL,
 	"svg2ass",
 };
@@ -677,7 +685,7 @@ static int ass_arc( ctx_t *ctx, vec_t v0, vec_t r, double phi, int fa, int fs, v
 	dt = vec_ang( h1, h2 );
 
 	// Perform the sweep in specified direction and draw arc segments
-	double step = M_PI / ( 0.36 * ( r.x + r.y ) );
+	double step = config.arcline * 2 / ( r.x + r.y );
 	// TODO: use bezier curves instead of lines
 	emit( "l " );
 	if ( fs )
@@ -1178,8 +1186,13 @@ static int usage( const char *progname, int version_only )
 		"     ASS dialog actor name; default: empty\n"
 		"  -T string\n"
 		"     ASS dialog style name; default: Default\n"
+		"Experimental:\n"
+		"  -z num\n"
+		"     For the elliptical arc approximation generate one line segment per num units\n"
+		"     of estimated arc length; default: %g\n"
 		, DFLT_EPSILON
 		, MAX_FPREC
+		, DFLT_ARCLINE
 	);
 	return 0;
 }
@@ -1189,7 +1202,7 @@ int main( int argc, char** argv )
 {
 	int nfiles = 0;
 	int opt;
-	const char *ostr = "-:a:e:f:ho:vA:E:L:S:T:";
+	const char *ostr = "-:a:e:z:f:ho:vA:E:L:S:T:";
 	FILE *ifp;
 
 	config.of = stdout;
@@ -1213,6 +1226,9 @@ int main( int argc, char** argv )
 			break;
 		case 'e':
 			config.epsilon = atof( optarg );
+			break;
+		case 'z':
+			config.arcline = atof( optarg );
 			break;
 		case 'f':
 			config.ass_fprec = atoi( optarg );
