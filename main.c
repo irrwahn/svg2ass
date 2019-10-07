@@ -340,6 +340,13 @@ static inline const char *getStringAttr( const nxmlNode_t *node, char *attr )
 	return ( 0 <= a ) ? node->att[a].val : NULL;
 }
 
+static inline const char *skip( const char *str, const char *skip )
+{
+	while ( *str && strchr( skip, *str ) )
+		++str;
+	return str;
+}
+
 static int parseStyles( ctx_t *ctx, const nxmlNode_t *node )
 {
 	unsigned nocol = 0;
@@ -393,8 +400,9 @@ static int parseStyles( ctx_t *ctx, const nxmlNode_t *node )
 		char name[100];
 		char value[100];
 
-		while ( sscanf( s, " %99[^ :] : %99[^ ;] ;%n", name, value, &n ) == 2 )
+		while ( sscanf( s, " %99[^ :] : %99[^ ;] %n", name, value, &n ) == 2 )
 		{
+			s = skip( s + n, ";" );
 			IPRINT( "    %s=%s\n", name, value );
 			if ( 0 == strcasecmp( name, "fill" ) )
 			{
@@ -422,7 +430,6 @@ static int parseStyles( ctx_t *ctx, const nxmlNode_t *node )
 				ctx->s_alpha = 255 - atof( value ) * 255;
 			else if ( 0 == strcasecmp( name, "stroke-width" ) )
 				ctx->s_width = atof( value );
-			s += n;
 		}
 	}
 
@@ -431,6 +438,7 @@ static int parseStyles( ctx_t *ctx, const nxmlNode_t *node )
 		ctx->f_alpha = 255;
 	if ( nocol & 2 )
 		ctx->s_alpha = 255;
+	//IPRINT( "    fill #%06x %u; stroke #%06x %u %g\n", ctx->f_col, ctx->f_alpha, ctx->s_col, ctx->s_alpha, ctx->s_width );
 	return 0;
 }
 
@@ -453,29 +461,29 @@ static int parseTransform( ctx_t *ctx, const char *trf )
 		m = MTX_UNI;
 		if ( 0 == strcasecmp( op, "translate" ) )
 		{
-			a = sscanf( s, " (%lf%n", &m.e, &n );
+			a = sscanf( s, " ( %lf %n", &m.e, &n );
 			if ( 1 == a )
 			{
-				s += n;
-				if ( 1 == sscanf( s, " ,%lf%n", &m.f, &n ) )
+				s = skip( s + n, "," );
+				if ( 1 == sscanf( s, " %lf%n", &m.f, &n ) )
 					s += n;
 			}
 		}
 		else if ( 0 == strcasecmp( op, "scale" ) )
 		{
-			a = sscanf( s, " (%lf%n", &m.a, &n );
+			a = sscanf( s, " ( %lf %n", &m.a, &n );
 			if ( 1 == a )
 			{
-				s += n;
+				s = skip( s + n, "," );
 				m.d = m.a;
-				if ( 1 == sscanf( s, " ,%lf%n", &m.d, &n ) )
+				if ( 1 == sscanf( s, " %lf%n", &m.d, &n ) )
 					s += n;
 			}
 		}
 		else if ( 0 == strcasecmp( op, "rotate" ) )
 		{
 			mtx_t r = MTX_UNI;
-			a = sscanf( s, " (%lf%n", &phi, &n );
+			a = sscanf( s, " ( %lf%n", &phi, &n );
 			if ( 1 == a )
 			{
 				s += n;
@@ -483,7 +491,8 @@ static int parseTransform( ctx_t *ctx, const char *trf )
 				r.a = r.d = cos( phi );
 				r.b = sin( phi );
 				r.c = -r.b;
-				if ( 2 == sscanf( s, " ,%lf ,%lf%n", &m.e, &m.f, &n ) )
+				if ( 2 == sscanf( s, " , %lf, %lf%n", &m.e, &m.f, &n )
+				  || 2 == sscanf( s, " %lf %lf%n", &m.e, &m.f, &n ) )
 				{
 					s += n;
 					ctx->ctm = mtx_mmul( ctx->ctm, m );
@@ -497,7 +506,7 @@ static int parseTransform( ctx_t *ctx, const char *trf )
 		}
 		else if ( 0 == strcasecmp( op, "skewX" ) )
 		{
-			a = sscanf( s, " (%lf%n", &phi, &n );
+			a = sscanf( s, " ( %lf%n", &phi, &n );
 			if ( 1 == a )
 			{
 				s += n;
@@ -506,7 +515,7 @@ static int parseTransform( ctx_t *ctx, const char *trf )
 		}
 		else if ( 0 == strcasecmp( op, "skewY" ) )
 		{
-			a = sscanf( s, " (%lf%n", &phi, &n );
+			a = sscanf( s, " ( %lf%n", &phi, &n );
 			if ( 1 == a )
 			{
 				s += n;
@@ -515,10 +524,14 @@ static int parseTransform( ctx_t *ctx, const char *trf )
 		}
 		else if ( 0 == strcasecmp( op, "matrix" ) )
 		{
-			a = sscanf( s, " (%lf ,%lf ,%lf ,%lf ,%lf ,%lf%n",
-								&m.a, &m.b, &m.c, &m.d, &m.e, &m.f, &n );
-			if ( 6 == a )
+			if ( 6 == sscanf( s, " ( %lf , %lf , %lf , %lf , %lf , %lf%n",
+								&m.a, &m.b, &m.c, &m.d, &m.e, &m.f, &n )
+			  || 6 == sscanf( s, " ( %lf %lf %lf %lf %lf %lf%n",
+								&m.a, &m.b, &m.c, &m.d, &m.e, &m.f, &n ) )
+			{
+				a = 1;
 				s += n;
+			}
 		}
 		if ( 0 < a )
 		{
