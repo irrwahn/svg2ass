@@ -61,6 +61,9 @@ there. However, depending on your runtime environment, you might
 have provide your own getopt, strdup or strcasecmp implementations.
 Also, you might have to manually copy version.in to version.h
 
+Apparently, it is advisable to change `strip -s` to `strip -S` in
+Makefile when building on macOS.
+
 
 ## Usage
 
@@ -68,7 +71,7 @@ Executing svg2ass -h displays a short help text. Among other general
 and ASS related, fairly self explaining command line options, SVG2ASS
 provides an option to render all shapes into a single drawing command
 per SVG file (which forces all shapes to use the same initial color
-and border width settings), or alternatively, produce a seperate
+and border width settings), or alternatively, produce a separate
 dialog line for each shape (which is the default).
 
 
