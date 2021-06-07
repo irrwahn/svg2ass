@@ -12,6 +12,11 @@ ignored. You can work around some of these limitations by converting
 all objects to paths and flattening your SVG as much as feasible.
 The SVG/XML is not validated at all - garbage in, garbage out!
 
+If you don't intend to build svg2ass yourself or just want to give
+it a quick test run, you may want to check out Gustavo Rodrigues'
+[svg2ass-gui](https://qgustavor.github.io/svg2ass-gui/).
+
+
 ### Supported SVG elements
 
   * g(roup)
@@ -63,6 +68,12 @@ Also, you might have to manually copy version.in to version.h
 
 Apparently, it is advisable to change `strip -s` to `strip -S` in
 Makefile when building on macOS.
+
+In case you wish to avoid the hassle of building from source altogether:
+As mentioned above, Gustavo Rodrigues created
+[svg2ass-gui](https://github.com/qgustavor/svg2ass-gui), a web GUI based
+on the svg2ass source code. You can try it live
+[here](https://qgustavor.github.io/svg2ass-gui/).
 
 
 ## Usage
