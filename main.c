@@ -86,6 +86,8 @@ static struct {
 	int ass_mode;
 	int ass_fprec;
 	int ass_layer;
+	int ass_scale_exp;
+	int ass_scale;
 	const char *ass_style;	// style name for event prefix
 	const char *ass_actor;	// actor name for event prefix
 	const char *ass_start;	// start time
@@ -98,6 +100,8 @@ static struct {
 	1,
 	1,
 	0,
+	1,
+	1,
 	"Default",
 	"",
 	"0:00:00.00",
@@ -251,6 +255,7 @@ int emitf( ctx_t *ctx, const char *fmt, ... )
 			case 'v':
 				v = va_arg( arglist, vec_t );
 				v = vec_mmul( ctx->ctm, v );
+				v = vec_scal( v, config.ass_scale );
 				r = emit( "%s ", ftoa( buf, config.ass_fprec, v.x ) );
 				r = emit( "%s",  ftoa( buf, config.ass_fprec, v.y ) );
 				break;
@@ -302,7 +307,8 @@ static inline int ass_line( ctx_t *ctx, int mode )
 				config.ass_style, config.ass_actor );
 		emit( "{\\an7\\1c&H%06X&\\1a&H%02X&\\3c&H%06X&\\3a&H%02X&",
 				ctx->f_col, ctx->f_alpha, ctx->s_col, ctx->s_alpha );
-		emitf( ctx, "\\bord%f\\shad0\\p1}", ctx->s_width );
+		emitf( ctx, "\\bord%f\\shad0", ctx->s_width );
+		emit( "\\p%d}", config.ass_scale_exp );
 		is_open = 1;
 		++config.ass_layer;
 	}
@@ -1200,6 +1206,12 @@ static int usage( const char *progname, int version_only )
 		"  -T string\n"
 		"     ASS dialog style name; default: Default\n"
 		"Experimental:\n"
+		"  -p num\n"
+		"     Set ASS draw mode scaling. This only affects the ASS \\p<num> tags in the\n"
+		"     output and expects an appropriately pre-scaled SVG. Default: 1\n"
+		"  -s num\n"
+		"     Same as -p, but additionally scale up the coordinates by a factor of 2^(num-1),\n"
+		"     ultimately resulting in a 1:1 mapping, but with increased ASS internal accuracy.\n"
 		"  -z num\n"
 		"     For the elliptical arc approximation generate one line segment per num units\n"
 		"     of estimated arc length; default: %g\n"
@@ -1215,7 +1227,7 @@ int main( int argc, char** argv )
 {
 	int nfiles = 0;
 	int opt;
-	const char *ostr = "-:a:e:z:f:ho:vA:E:L:S:T:";
+	const char *ostr = "-:a:e:p:s:z:f:ho:vA:E:L:S:T:";
 	FILE *ifp;
 
 	config.of = stdout;
@@ -1239,6 +1251,17 @@ int main( int argc, char** argv )
 			break;
 		case 'e':
 			config.epsilon = atof( optarg );
+			break;
+		case 'p':
+			config.ass_scale_exp = atoi( optarg );
+			if ( 1 > config.ass_scale_exp )
+				err( ELVL_FATAL, 1, "argument for option -p out of range" );
+			break;
+		case 's':
+			config.ass_scale_exp = atoi( optarg );
+			if ( 1 > config.ass_scale_exp )
+				err( ELVL_FATAL, 1, "argument for option -s out of range" );
+			config.ass_scale = 1U << (config.ass_scale_exp - 1);
 			break;
 		case 'z':
 			config.arcline = atof( optarg );
