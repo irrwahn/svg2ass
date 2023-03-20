@@ -8,6 +8,7 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 #include <strings.h>
 
 #define RGB2BGR(R,G,B) ((unsigned)(B)<<16 | (G)<<8 | (R))
@@ -172,11 +173,27 @@ unsigned convColorBGR( const char *s )
 	unsigned bgr = 0;
 	if ( '#' == *s )
 	{
+		unsigned len = strlen(s);
 		unsigned rgb = strtoul( s + 1, NULL, 16 );
-		bgr = (rgb & 0xFF) << 16 | (rgb & 0xFF00) | (rgb & 0xFF0000 ) >> 16;
+		/* Handle alpha channel */
+		if ( len == 5 ) rgb >>= 4;
+		if ( len == 9 ) rgb >>= 8;
+		if ( len < 6 )
+		{
+			/* Short hex */
+			bgr = (rgb & 0xF00) >> 8 | (rgb & 0xF00) >> 4 |
+			      (rgb & 0xF0) << 4 | (rgb & 0xF0) << 8 |
+			      (rgb & 0xF) << 16 | (rgb & 0xF) << 20;
+		}
+		else
+		{
+			/* Long hex */
+			bgr = (rgb & 0xFF) << 16 | (rgb & 0xFF00) | (rgb & 0xFF0000 ) >> 16;
+		}
 	}
 	else
 	{
+		/* Named color */
 		for ( int i = 0; cols[i].s; ++i )
 			if ( 0 == strcasecmp( cols[i].s, s ) )
 			{
